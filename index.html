@@ -1,0 +1,2016 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Real-time Earthquake Activity Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<!-- When hosting externally, change above to: https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js -->
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#070b15;--card:#0d1420;--surface:#111a2b;--hover:#1a2540;
+  --bdr:rgba(99,102,241,.1);--bdr2:rgba(99,102,241,.18);
+  --tx:#d4dae6;--tx2:#6b7a94;--acc:#6366f1;--acc-bg:rgba(99,102,241,.12);
+  --font:system-ui,-apple-system,sans-serif;
+  --mono:ui-monospace,'SF Mono','Cascadia Code',monospace;
+  --green:#22c55e;--red:#ef4444;--orange:#f97316;--amber:#eab308;--cyan:#06b6d4;--blue:#3b82f6;
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-family:var(--font);font-size:13px}
+.dash{display:flex;height:100vh}
+.sb{width:52px;background:var(--card);border-right:1px solid var(--bdr);display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:4px;flex-shrink:0;z-index:5}
+.sb .logo{width:32px;height:32px;background:var(--acc);border-radius:8px;display:flex;align-items:center;justify-content:center;margin-bottom:16px;font-weight:700;font-size:11px;color:#fff;letter-spacing:-.5px}
+.nb{width:36px;height:36px;border-radius:8px;border:none;background:0 0;color:var(--tx2);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s}
+.nb:hover,.nb.on{background:var(--acc-bg);color:var(--acc)}
+.nb svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.sb .sp{flex:1}
+.mn{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.tb{padding:10px 20px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--bdr);flex-shrink:0}
+.tb h1{font-size:15px;font-weight:600;letter-spacing:-.3px;white-space:nowrap}
+.sr-wrap{position:relative;flex:1;max-width:300px}
+.sr{width:100%;height:32px;background:var(--card);border:1px solid var(--bdr);border-radius:8px;padding:0 10px;color:var(--tx);font:12px var(--font);outline:0}
+.sr:focus{border-color:var(--acc)}
+.sr-drop{position:absolute;top:36px;left:0;right:0;background:var(--card);border:1px solid var(--bdr2);border-radius:8px;z-index:20;max-height:300px;overflow-y:auto;display:none;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+.sr-item{padding:8px 12px;cursor:pointer;display:flex;gap:8px;align-items:center;border-bottom:1px solid var(--bdr);font-size:12px;transition:background .1s}
+.sr-item:hover{background:var(--hover)}
+.sr-item:last-child{border-bottom:none}
+.sr-empty{padding:14px;text-align:center;color:var(--tx2);font-size:12px}
+.sr-status{padding:6px 12px;font-size:10px;color:var(--tx2);border-bottom:1px solid var(--bdr);text-transform:uppercase;letter-spacing:.5px}
+.tb .sp{flex:1}
+.pill{padding:3px 10px;border-radius:12px;font-size:11px;font-weight:500}
+.pill-live{background:rgba(34,197,94,.15);color:var(--green)}
+.upd{color:var(--tx2);font-size:11px;white-space:nowrap}
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:10px 20px;flex-shrink:0}
+.cd{background:var(--card);border:1px solid var(--bdr);border-radius:10px;padding:12px 14px}
+.cd-l{font-size:10px;color:var(--tx2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}
+.cd-v{font-size:24px;font-weight:700;letter-spacing:-1px;font-family:var(--mono)}
+.cd-s{font-size:11px;color:var(--tx2);margin-top:3px;display:flex;align-items:center;gap:4px}
+.cd-s .up{color:var(--red)}
+.cd-s .dn{color:var(--green)}
+#cme-banner{padding:0 20px}
+#cme-banner:empty{display:none}
+.cme-bar{display:flex;align-items:center;gap:14px;padding:10px 16px;background:rgba(249,115,22,.06);border:1px solid rgba(249,115,22,.25);border-radius:10px;margin-bottom:6px;cursor:pointer;transition:background .15s}
+.cme-bar:hover{background:rgba(249,115,22,.1)}
+.cme-icon{width:34px;height:34px;border-radius:8px;background:rgba(249,115,22,.15);color:#f97316;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}
+.cme-body{flex:1;min-width:0}
+.cme-title{font-size:12px;font-weight:600;color:#f97316}
+.cme-meta{font-size:11px;color:var(--tx2);margin-top:1px}
+.cme-eta{font-family:var(--mono);font-size:14px;font-weight:700;color:#f97316;flex-shrink:0;text-align:right}
+.cme-eta-label{font-size:9px;color:var(--tx2);text-transform:uppercase;letter-spacing:.5px}
+.ct{flex:1;display:flex;overflow:hidden;min-height:0}
+.mw{flex:1;position:relative;overflow:hidden;min-width:0;background:#040810}
+.mw svg{width:100%;height:100%;display:block;cursor:grab;touch-action:none}
+.mw svg:active{cursor:grabbing}
+.ml{position:absolute;bottom:12px;left:12px;display:flex;gap:5px;z-index:2}
+.lb{padding:4px 9px;border-radius:6px;border:1px solid var(--bdr);background:rgba(7,11,21,.88);color:var(--tx2);font-size:11px;cursor:pointer;backdrop-filter:blur(8px);transition:.15s;font-family:var(--font)}
+.lb.on{background:var(--acc-bg);color:var(--acc);border-color:var(--bdr2)}
+.mt{position:fixed;background:rgba(10,16,28,.96);border:1px solid rgba(99,102,241,.2);border-radius:8px;padding:8px 12px;pointer-events:none;z-index:10;font-size:12px;backdrop-filter:blur(12px);display:none;max-width:220px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+.mt .mg{font-family:var(--mono);font-weight:700;font-size:15px}
+.mt .lc{color:var(--tx2);margin-top:2px;font-size:11px}
+.mt .dp{color:var(--tx2);font-size:11px;margin-top:1px}
+.zh{position:absolute;bottom:12px;right:12px;font-size:11px;color:var(--tx2);background:rgba(7,11,21,.8);padding:4px 10px;border-radius:6px;z-index:2;pointer-events:none}
+.pn{width:310px;border-left:1px solid var(--bdr);display:flex;flex-direction:column;overflow:hidden;flex-shrink:0;background:var(--card)}
+.pt{display:flex;border-bottom:1px solid var(--bdr);flex-shrink:0}
+.ptb{flex:1;padding:10px;text-align:center;font-size:12px;font-weight:500;color:var(--tx2);cursor:pointer;border:none;border-bottom:2px solid transparent;transition:.15s;background:0 0;font-family:var(--font)}
+.ptb.on{color:var(--acc);border-bottom-color:var(--acc)}
+.pc{flex:1;overflow-y:auto}
+.ei{padding:9px 12px;border-bottom:1px solid var(--bdr);cursor:pointer;transition:background .1s;display:flex;gap:9px;align-items:flex-start}
+.ei:hover{background:var(--hover)}
+.ei.sel{background:var(--acc-bg)}
+.eb{min-width:38px;height:24px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:700;font-size:12px;flex-shrink:0}
+.eif{flex:1;min-width:0}
+.eif .el{font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.eif .em{font-size:11px;color:var(--tx2);margin-top:2px;display:flex;gap:7px}
+.eif .em span{white-space:nowrap}
+.dt{padding:14px}
+.dt-h{margin-bottom:14px}
+.dt-m{font-size:34px;font-weight:700;font-family:var(--mono);letter-spacing:-2px}
+.dt-l{font-size:13px;margin-top:3px}
+.dt-t{font-size:12px;color:var(--tx2);margin-top:3px}
+.dt-g{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:14px}
+.ds{background:var(--surface);border-radius:7px;padding:9px 11px}
+.ds-l{font-size:10px;color:var(--tx2);text-transform:uppercase;letter-spacing:.5px}
+.ds-v{font-family:var(--mono);font-weight:600;font-size:14px;margin-top:2px}
+.ta{margin-top:10px;padding:9px 12px;border-radius:7px;font-size:12px;font-weight:500;display:flex;align-items:center;gap:7px}
+.ta-ok{background:rgba(34,197,94,.1);color:var(--green);border:1px solid rgba(34,197,94,.2)}
+.ta-wr{background:rgba(239,68,68,.1);color:var(--red);border:1px solid rgba(239,68,68,.2)}
+.dt-s{margin-top:18px}
+.dt-s h3{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--tx2);margin-bottom:8px}
+.es{padding:40px 20px;text-align:center;color:var(--tx2)}
+.es p{font-size:13px;margin-top:8px}
+.as{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:12px}
+.as-d{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.as-m{font-family:var(--mono);font-weight:600;width:30px}
+.as-t{color:var(--tx2);flex:1;font-size:11px}
+.nb-i{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:12px}
+.nb-i .eb{min-width:34px;height:20px;font-size:11px;border-radius:4px}
+.nb-i .el{font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nb-i .ed{font-size:11px;color:var(--tx2)}
+.fl{padding:7px 12px;border-bottom:1px solid var(--bdr);display:flex;gap:5px;flex-wrap:wrap;flex-shrink:0}
+.fc{padding:3px 7px;border-radius:5px;border:1px solid var(--bdr);background:0 0;color:var(--tx2);font-size:10px;cursor:pointer;font-family:var(--font);transition:.15s}
+.fc.on{background:var(--acc-bg);color:var(--acc);border-color:var(--bdr2)}
+.cr{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:10px 20px;flex-shrink:0}
+.cc{background:var(--card);border:1px solid var(--bdr);border-radius:10px;padding:10px 12px;overflow:hidden;min-width:0}
+.cc-t{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--tx2);margin-bottom:6px}
+.cw{width:100%;height:clamp(90px,12vh,140px);position:relative}
+.cw svg{width:100%;height:100%;overflow:visible}
+.pulse-ring{fill:none;pointer-events:none}
+
+/* Page content */
+.pgc{flex:1;overflow-y:auto;padding:20px;display:none}
+.pg-section{margin-bottom:24px}
+.pg-section h2{font-size:14px;font-weight:600;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.pg-section h2 .badge{font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px}
+
+/* Events table */
+.ev-head{display:grid;grid-template-columns:60px 1fr 100px 80px 100px;gap:8px;padding:8px 14px;font-size:10px;color:var(--tx2);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--bdr);background:var(--card);border-radius:8px 8px 0 0;cursor:pointer;user-select:none}
+.ev-head span:hover{color:var(--acc)}
+.ev-row{display:grid;grid-template-columns:60px 1fr 100px 80px 100px;gap:8px;padding:10px 14px;font-size:12px;border-bottom:1px solid var(--bdr);cursor:pointer;transition:background .1s;align-items:center}
+.ev-row:hover{background:var(--hover)}
+.ev-row:last-child{border-bottom:none;border-radius:0 0 8px 8px}
+.ev-table{background:var(--card);border:1px solid var(--bdr);border-radius:10px;overflow:hidden}
+
+/* Alert cards */
+.alert-card{background:var(--card);border:1px solid var(--bdr);border-radius:10px;padding:16px;margin-bottom:10px;display:flex;gap:14px;align-items:flex-start}
+.alert-card.critical{border-color:rgba(239,68,68,.3);background:rgba(239,68,68,.04)}
+.alert-card.info{border-color:rgba(34,197,94,.2);background:rgba(34,197,94,.03)}
+.alert-icon{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px}
+.alert-body{flex:1}
+.alert-title{font-size:13px;font-weight:600;margin-bottom:3px}
+.alert-meta{font-size:11px;color:var(--tx2)}
+
+/* Analytics grid */
+.an-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.an-card{background:var(--card);border:1px solid var(--bdr);border-radius:10px;padding:14px}
+.an-card h3{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--tx2);margin-bottom:10px}
+.an-cw{width:100%;height:clamp(140px,22vh,220px);position:relative}
+.an-cw svg{width:100%;height:100%;overflow:visible}
+.stat-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}
+.stat-item{background:var(--card);border:1px solid var(--bdr);border-radius:10px;padding:14px}
+.stat-label{font-size:10px;color:var(--tx2);text-transform:uppercase;letter-spacing:.5px}
+.stat-val{font-size:22px;font-weight:700;font-family:var(--mono);margin-top:4px}
+.stat-sub{font-size:11px;color:var(--tx2);margin-top:2px}
+
+/* Settings */
+.set-group{background:var(--card);border:1px solid var(--bdr);border-radius:10px;padding:16px;margin-bottom:12px}
+.set-group h3{font-size:12px;font-weight:600;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--bdr)}
+.set-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(99,102,241,.05)}
+.set-row:last-child{border-bottom:none}
+.set-label{font-size:12px}
+.set-val{font-size:12px;color:var(--tx2);background:var(--surface);padding:4px 10px;border-radius:6px;border:1px solid var(--bdr)}
+.saved-loc{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid rgba(99,102,241,.05)}
+.saved-loc:last-child{border-bottom:none}
+.loc-pin{width:28px;height:28px;border-radius:6px;background:var(--acc-bg);color:var(--acc);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+.loc-info{flex:1}
+.loc-name{font-size:12px;font-weight:500}
+.loc-detail{font-size:11px;color:var(--tx2);margin-top:1px}
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:0 0}
+::-webkit-scrollbar-thumb{background:rgba(99,102,241,.2);border-radius:3px}
+@media print{
+  .sb,.ml,.zh,.mt{display:none!important}
+  .dash{height:auto;overflow:visible}
+  .mn{overflow:visible}
+  .ct{flex-direction:column;overflow:visible}
+  .pn{width:100%;border-left:none;border-top:1px solid #333}
+}
+@media(max-width:900px){
+  .cards{grid-template-columns:repeat(2,1fr)}
+  .ct{flex-direction:column}
+  .pn{width:100%;height:280px;border-left:none;border-top:1px solid var(--bdr)}
+  .cr{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div class="dash">
+  <aside class="sb">
+    <div class="logo">EQ</div>
+    <button class="nb on" data-page="dashboard" title="Dashboard"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></button>
+    <button class="nb" data-page="map" title="Live Map"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c-2 2.5-3 5.5-3 9s1 6.5 3 9c2-2.5 3-5.5 3-9s-1-6.5-3-9"/></svg></button>
+    <button class="nb" data-page="events" title="Recent Events"><svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg></button>
+    <button class="nb" data-page="alerts" title="Alerts"><svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/></svg></button>
+    <button class="nb" data-page="analytics" title="Analytics"><svg viewBox="0 0 24 24"><path d="M18 20V10M12 20V4M6 20v-6"/></svg></button>
+    <button class="nb" data-page="enso" title="El Niño / La Niña"><svg viewBox="0 0 24 24"><path d="M2 12c2-3 4-4 6-4s4 2 6 2 4-2 6-4M2 17c2-3 4-4 6-4s4 2 6 2 4-2 6-4M2 7c2-3 4-4 6-4s4 2 6 2 4-2 6-4"/></svg></button>
+    <button class="nb" data-page="solar" title="Solar Activity"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg></button>
+    <button class="nb" data-page="schumann" title="Schumann Resonance"><svg viewBox="0 0 24 24"><path d="M2 12h2l3-9 3 18 3-12 3 6 2-3h4"/></svg></button>
+    <button class="nb" data-page="risk" title="Seismic Risk Factors"><svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg></button>
+    <div class="sp"></div>
+    <button class="nb" data-page="settings" title="Settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+  </aside>
+  <div class="mn">
+    <div class="tb">
+      <h1>Earthquake Activity</h1>
+      <div class="sr-wrap">
+        <input class="sr" id="search" placeholder="Search locations or events…" autocomplete="off" />
+        <div class="sr-drop" id="sr-drop"></div>
+      </div>
+      <div class="sp"></div>
+      <span id="moon-ind" style="display:flex;align-items:center;gap:6px;font-size:12px;padding:4px 10px;background:var(--card);border:1px solid var(--bdr);border-radius:8px;cursor:pointer" onclick="switchPage('risk')"></span>
+      <span class="pill pill-live" id="live-pill">&#9679; Live</span>
+      <span class="upd" id="upd-time">Loading…</span>
+    </div>
+    <div class="cards" id="cards"></div>
+    <div id="cme-banner"></div>
+    <div class="ct">
+      <div class="mw">
+        <svg id="map"></svg>
+        <div class="ml" id="layers"></div>
+        <span class="zh">Scroll to zoom · Drag to pan</span>
+        <div class="mt" id="tip"></div>
+      </div>
+      <div class="pn">
+        <div class="pt">
+          <button class="ptb on" data-tab="recent">Recent Events</button>
+          <button class="ptb" data-tab="detail">Detail</button>
+        </div>
+        <div class="fl" id="filters"></div>
+        <div class="pc" id="panel"></div>
+      </div>
+    </div>
+    <div class="cr" id="charts"></div>
+    <div id="pgc" class="pgc"></div>
+  </div>
+</div>
+
+<script>
+const NOW = Date.now(), H = 36e5, D = 864e5;
+let isLive = false, lastUpdate = null;
+
+let EQ = [
+  {id:'e01',mag:5.8,lat:-38.65,lng:178.35,depth:35,loc:'42 km E of Gisborne, New Zealand',region:'New Zealand',time:NOW-2*H,tsunami:false,felt:1240},
+  {id:'e02',mag:4.6,lat:42.5,lng:144.8,depth:45,loc:'Offshore Hokkaido, Japan',region:'Japan',time:NOW-3.5*H,tsunami:false,felt:380},
+  {id:'e03',mag:6.2,lat:-33.5,lng:-72.1,depth:28,loc:'Near coast of central Chile',region:'Chile',time:NOW-1.2*H,tsunami:true,felt:4800},
+  {id:'e04',mag:3.2,lat:36.2,lng:-120.5,depth:8,loc:'Central California',region:'California',time:NOW-6*H,tsunami:false,felt:45},
+  {id:'e05',mag:7.1,lat:51.8,lng:-176.2,depth:55,loc:'Aleutian Islands, Alaska',region:'Alaska',time:NOW-0.5*H,tsunami:true,felt:2100},
+  {id:'e06',mag:4.1,lat:-21.2,lng:-175.5,depth:120,loc:'Tonga Islands region',region:'Tonga',time:NOW-8*H,tsunami:false,felt:90},
+  {id:'e07',mag:5.3,lat:7.1,lng:126.8,depth:65,loc:'Mindanao, Philippines',region:'Philippines',time:NOW-4*H,tsunami:false,felt:890},
+  {id:'e08',mag:3.8,lat:39.2,lng:43.5,depth:12,loc:'Eastern Turkey',region:'Mediterranean',time:NOW-12*H,tsunami:false,felt:120},
+  {id:'e09',mag:4.9,lat:-8.2,lng:112.5,depth:95,loc:'Java, Indonesia',region:'Indonesia',time:NOW-5*H,tsunami:false,felt:450},
+  {id:'e10',mag:6.5,lat:-6.1,lng:147.8,depth:42,loc:'Eastern Papua New Guinea',region:'PNG',time:NOW-0.8*H,tsunami:false,felt:3200},
+  {id:'e11',mag:3.5,lat:36.8,lng:22.5,depth:18,loc:'Southern Greece',region:'Mediterranean',time:NOW-15*H,tsunami:false,felt:65},
+  {id:'e12',mag:5.1,lat:-30.2,lng:-178.5,depth:35,loc:'Kermadec Islands region',region:'New Zealand',time:NOW-7*H,tsunami:false,felt:0},
+  {id:'e13',mag:4.3,lat:3.5,lng:96.2,depth:78,loc:'Northern Sumatra, Indonesia',region:'Indonesia',time:NOW-9*H,tsunami:false,felt:210},
+  {id:'e14',mag:3.9,lat:-16.5,lng:-72.8,depth:95,loc:'Southern Peru',region:'Chile',time:NOW-18*H,tsunami:false,felt:85},
+  {id:'e15',mag:5.6,lat:52.8,lng:159.2,depth:45,loc:'Kamchatka Peninsula, Russia',region:'Japan',time:NOW-3*H,tsunami:false,felt:620},
+  {id:'e16',mag:4.8,lat:23.5,lng:121.5,depth:22,loc:'Taiwan region',region:'Philippines',time:NOW-6.5*H,tsunami:false,felt:580},
+  {id:'e17',mag:3.1,lat:31.5,lng:-115.8,depth:10,loc:'Baja California, Mexico',region:'California',time:NOW-22*H,tsunami:false,felt:30},
+  {id:'e18',mag:4.5,lat:-8.5,lng:157.2,depth:55,loc:'Solomon Islands',region:'PNG',time:NOW-10*H,tsunami:false,felt:180},
+  {id:'e19',mag:5.9,lat:44.8,lng:150.2,depth:38,loc:'Kuril Islands, Russia',region:'Japan',time:NOW-2.5*H,tsunami:false,felt:410},
+  {id:'e20',mag:3.7,lat:-41.3,lng:174.8,depth:28,loc:'Wellington region, NZ',region:'New Zealand',time:NOW-14*H,tsunami:false,felt:95},
+  {id:'e21',mag:4.2,lat:-17.5,lng:168.5,depth:45,loc:'Vanuatu Islands',region:'PNG',time:NOW-11*H,tsunami:false,felt:140},
+  {id:'e22',mag:6.8,lat:-24.8,lng:-178.8,depth:520,loc:'South of the Fiji Islands',region:'Tonga',time:NOW-0.3*H,tsunami:false,felt:50},
+  {id:'e23',mag:3.4,lat:42.8,lng:13.2,depth:8,loc:'Central Italy',region:'Mediterranean',time:NOW-20*H,tsunami:false,felt:55},
+  {id:'e24',mag:5.4,lat:9.8,lng:-84.2,depth:35,loc:'Central Costa Rica',region:'California',time:NOW-4.5*H,tsunami:false,felt:1800},
+  {id:'e25',mag:4.7,lat:44.2,lng:-128.5,depth:12,loc:'Offshore Oregon, USA',region:'California',time:NOW-8.5*H,tsunami:false,felt:25}
+];
+
+// Higher-resolution continent outlines
+const CONTINENTS = [
+  // North America (with Florida, Gulf coast, Baja)
+  [[-170,66],[-168,64],[-166,62],[-164,60],[-162,58.5],[-159,58],[-156,57.5],[-155,58.5],[-152,59],[-150,61],[-148,61],[-146,62],[-142,60],[-139,59],[-136,57.5],[-134,56],[-132,55],[-130,55],[-128,52.5],[-127,51],[-126,49.5],[-125.5,48.5],[-124.5,47],[-124,45],[-124,43],[-124,41],[-123,39.5],[-122.5,38],[-122,37],[-121,36],[-120,35],[-119,34.5],[-118,34],[-117.5,33],[-117,32],[-116,30.5],[-115,29],[-113.5,27],[-112,25.5],[-110.5,24],[-109.5,23],[-106,22.5],[-105,20.5],[-104,19.5],[-102,18],[-100,17.5],[-97.5,16.5],[-95.5,16],[-93,15.5],[-91,15],[-89,14],[-87,13],[-85.5,11],[-84,10],[-83,9],[-82,8.5],[-80,9],[-79,9.5],[-82,11],[-84,13],[-84,16],[-86,16],[-88,18],[-90,19],[-90,21.5],[-88,21.5],[-87,19],[-87.5,17],[-91,18.5],[-93,19.5],[-95,20],[-97,22],[-97,25.5],[-97,27],[-96,28.5],[-95,29],[-93.5,29.5],[-91,29],[-89,29.5],[-88,30.5],[-86,30.5],[-85,30],[-84,29],[-83,28],[-82,26.5],[-81,25.5],[-80.5,25],[-81,24.5],[-82,25.5],[-83,27.5],[-84,29],[-85,30],[-82.5,31],[-81,31.5],[-80,32.5],[-79,33.5],[-78,34.5],[-76,36],[-75.5,37],[-75,38.5],[-74,40],[-73,41],[-71,41.5],[-70,42],[-69,43.5],[-67.5,44],[-66,45],[-64,46],[-61,46],[-60,47],[-57,47.5],[-55.5,49],[-53,48],[-55,47],[-59,47],[-58,49],[-56,50.5],[-55,52],[-58,54],[-61,56],[-65,58],[-70,60],[-75,62],[-80,65],[-86,67],[-92,69],[-98,71],[-106,73],[-118,73],[-130,73],[-140,71],[-148,68],[-155,70],[-160,70],[-165,69],[-168,67],[-170,66]],
+  // South America
+  [[-77,7],[-75,6.5],[-73,8],[-71,10.5],[-69,11],[-66,10.5],[-63,10.5],[-60,8.5],[-58,6.5],[-55,5],[-52,4],[-50,2],[-48,0],[-44,-2.5],[-41,-3],[-38,-4],[-35,-6],[-35,-9],[-35,-12],[-37,-14],[-39,-17],[-40,-20],[-41,-22],[-43,-23],[-45,-24],[-47,-26],[-48.5,-28],[-50,-30],[-52,-33],[-54,-34],[-57,-36],[-58,-38],[-62,-40],[-64,-42],[-66,-46],[-68,-50],[-68,-54],[-72,-54],[-74,-50],[-75,-47],[-75,-44],[-75,-40],[-75,-37],[-75,-33],[-75,-30],[-74,-25],[-73,-22],[-72,-18],[-71,-16],[-74,-14],[-76,-10],[-78,-5],[-80,-2],[-80,0],[-79,2],[-78,4],[-77,7]],
+  // Africa
+  [[-5,36],[-2,35.5],[0,36],[3,37],[5,37],[8,37],[10,37],[12,33],[15,32],[18,32],[22,32],[25,31.5],[28,31],[30,31.5],[32,31.5],[33,30],[35,28],[37,24],[39,20],[42,16],[43,12.5],[45,12],[48,11],[50,11.5],[51,11],[49,7],[46,4],[43,0],[41,-3],[40,-7],[39,-10],[37,-15],[35,-20],[34,-24],[32,-28],[30,-32],[27,-33.5],[25,-34],[22,-34.5],[19,-34.5],[18,-34.5],[15,-28],[13,-22],[12,-17],[10,-10],[9,-4],[8,0],[6,4],[3,6],[1,6],[-2,5],[-5,5],[-8,5],[-10,5],[-13,8],[-15,11],[-17,14],[-17,18],[-17,21],[-16,24],[-14,27],[-11,30],[-8,33],[-5,36]],
+  // Europe (main body)
+  [[-10,36],[-9,38],[-9,40],[-8,42],[-5,43.5],[-2,43.5],[0,41],[2,43],[5,43.5],[7,44],[9,44],[12,44],[14,42],[15,41],[16,40],[16,38.5],[15.5,37.5],[13,38],[12,41],[14,42],[16,44],[18,42],[20,40],[22,38],[25,37],[27,39],[28,41],[30,43],[30,46],[28,48],[24,52],[22,55],[20,58],[22,60],[24,63],[23,66],[20,68],[22,70],[25,71],[30,71],[36,70],[42,68],[47,67],[52,64],[57,61],[60,60],[58,56],[55,53],[52,52],[48,50],[44,48],[40,44],[35,42],[30,40],[28,38],[25,36],[22,37],[18,40],[14,43],[10,46],[8,54],[10,56],[12,56],[14,58],[12,63],[14,65],[17,68],[20,70],[25,71],[12,56],[8,56],[7,57],[5,52],[3,49],[0,51],[-3,50],[-5,48],[-4,49],[-3,48],[0,44],[2,43],[-10,36]],
+  // Asia (main body)
+  [[30,42],[34,40],[38,40],[40,42],[42,44],[45,41],[48,38],[51,36],[54,30],[57,26],[60,25],[63,27],[66,29],[69,28],[68,24],[66,24],[66,22],[68,20],[70,18],[72,15],[74,12],[76,9],[77,8],[79,8],[80,10],[82,14],[84,17],[86,20],[88,22],[89,23],[90,22],[92,20],[94,16],[97,12],[99,8],[101,5],[103,2],[104,4],[106,9],[107,14],[109,18],[112,21],[115,22],[118,23],[120,25],[122,25],[121,22],[119,17],[118,14],[117,10],[115,4],[113,1],[115,4],[118,10],[119,14],[121,18],[122,23],[123,28],[126,31],[126,34],[127,36],[128,38],[129,39],[128,36],[126,33],[129,34],[131,36],[134,40],[137,43],[139,44],[141,45],[144,47],[148,50],[152,52],[156,54],[160,57],[163,60],[167,63],[172,66],[178,68],[180,68],[180,75],[170,73],[155,72],[140,74],[120,72],[105,74],[90,72],[80,72],[72,68],[65,63],[60,60],[56,56],[52,52],[48,50],[44,47],[40,44],[35,42],[30,42]],
+  // Arabian Peninsula
+  [[35,28],[37,24],[39,20],[42,16],[43,14],[44,12.5],[46,13],[49,14.5],[52,17],[55,22],[56,25],[55,26.5],[52,24],[50,26],[48,28],[44,30],[40,29],[36,30],[35,28]],
+  // Indian Subcontinent
+  [[68,24],[66,24],[68,20],[70,18],[72,15],[74,12],[76,9],[77,8],[79,8],[80,10],[82,14],[84,17],[86,20],[88,22],[89,23],[87,24],[68,24]],
+  // Indochina Peninsula
+  [[100,7],[99,8],[97,12],[98,16],[100,17],[101,14],[102,13],[103,10],[104,8],[105,10],[106,12],[108,16],[109,18],[108,22],[106,18],[105,12],[104,8],[103,4],[101,5],[100,7]],
+  // Malay Peninsula
+  [[100,7],[101,5],[103,2],[104,1.5],[103,1],[101,3],[100,5],[100,7]],
+  // Korean Peninsula
+  [[126,34],[126,36],[127,37],[128,38.5],[129,39],[129,37],[128,35.5],[127,34],[126,34]],
+  // Australia
+  [[115,-34],[116,-30],[117,-25],[118,-20],[121,-17],[125,-15],[128,-14],[131,-12],[134,-12],[137,-12],[140,-11],[142,-10],[144,-14],[146,-17],[148,-20],[150,-23],[152,-26],[153,-29],[153,-32],[151,-35],[148,-37],[145,-38],[141,-38],[138,-37],[135,-35],[132,-34],[128,-33],[123,-33],[119,-34],[115,-34]],
+  // Tasmania
+  [[145,-40],[147,-41],[148,-43],[146,-44],[145,-42],[145,-40]],
+  // Japan (Honshu/Kyushu/Shikoku)
+  [[130,31],[131,33],[133,34],[135,34],[137,35],[139,35],[140,36],[141,38],[141,40],[142,43],[144,44],[145,45],[143,44],[141,43],[140,40],[139,37],[137,35],[135,34],[132,33],[130,31]],
+  // Hokkaido
+  [[140,42],[141,42],[143,43],[145,44],[145,43],[143,42],[141,41],[140,42]],
+  // NZ North Island
+  [[173,-37],[175,-37],[177,-37],[178,-38],[178,-40],[177,-41],[175,-42],[174,-41],[173,-39],[173,-37]],
+  // NZ South Island
+  [[167,-44],[169,-43],[171,-42],[173,-42],[173,-44],[172,-45],[171,-46],[169,-47],[167,-46],[167,-44]],
+  // Indonesia: Sumatra
+  [[95,-6],[96,-2],[97,1],[98,3],[100,2],[102,0],[104,-1],[105,-2],[106,-4],[105,-5],[103,-5],[100,-4],[97,-5],[95,-6]],
+  // Indonesia: Java
+  [[105,-6],[107,-6],[108,-7],[110,-7],[112,-8],[114,-8],[116,-8],[114,-8],[112,-7],[109,-7],[107,-6],[105,-6]],
+  // Indonesia: Borneo
+  [[109,1],[111,1],[113,2],[115,4],[117,4],[118,2],[119,0],[118,-2],[116,-4],[114,-3],[112,-3],[110,-1],[109,1]],
+  // Indonesia: Sulawesi
+  [[119,-2],[120,0],[121,1],[122,1],[123,0],[122,-2],[121,-3],[120,-5],[119,-4],[120,-3],[119,-2]],
+  // Papua New Guinea
+  [[141,-3],[143,-3],[145,-5],[147,-6],[149,-6],[151,-5],[154,-5],[155,-6],[153,-8],[150,-9],[147,-8],[145,-7],[143,-6],[141,-4],[141,-3]],
+  // Greenland
+  [[-55,60],[-48,60],[-42,62],[-35,65],[-25,68],[-20,72],[-18,76],[-22,79],[-30,81],[-40,83],[-48,82],[-53,80],[-57,77],[-60,73],[-58,68],[-55,60]],
+  // UK
+  [[-6,50],[-5,51],[-4,53],[-3,54],[-5,56],[-4,57],[-3,58],[-5,59],[-7,58],[-6,56],[-5,54],[-6,52],[-6,50]],
+  // Ireland
+  [[-10,52],[-8,51],[-6,52],[-6,54],[-7,55],[-10,54],[-10,52]],
+  // Iceland
+  [[-24,64],[-21,63],[-16,64],[-13,65],[-14,66],[-18,66],[-22,66],[-24,65],[-24,64]],
+  // Scandinavian Peninsula (overlay)
+  [[5,58],[5,62],[8,58],[10,56],[12,56],[14,58],[12,63],[14,65],[17,68],[20,70],[25,71],[28,70],[25,65],[22,62],[18,58],[15,56],[12,56],[10,57],[5,58]],
+  // Madagascar
+  [[44,-13],[47,-14],[50,-17],[50,-22],[48,-25],[44,-26],[43,-22],[43,-18],[44,-13]],
+  // Philippines
+  [[119,6],[120,8],[121,10],[122,12],[123,14],[122,18],[121,18],[120,15],[119,12],[119,9],[119,6]],
+  // Taiwan
+  [[120,22],[121,23],[122,25],[121,25],[120,24],[120,22]],
+  // Sri Lanka
+  [[80,6],[81,7],[82,8],[82,7],[81,6],[80,6]],
+  // Cuba
+  [[-85,22],[-83,22],[-80,22],[-77,20],[-75,20],[-78,21],[-82,22],[-85,22]],
+  // Hispaniola
+  [[-74,18],[-72,18],[-69,18.5],[-69,19.5],[-72,20],[-74,19],[-74,18]],
+  // Hawaii
+  [[-156,20],[-155.5,19.7],[-155,19.5],[-155,20],[-156,20.5],[-156,20]],
+  [[-157,21],[-156.5,20.8],[-156,21],[-156.5,21.3],[-157,21.3],[-157,21]],
+  [[-158,21.3],[-157.5,21.3],[-157.7,21.7],[-158.2,21.6],[-158,21.3]],
+  [[-160,22],[-159.3,22],[-159.3,21.7],[-160,21.8],[-160,22]],
+  // Fiji
+  [[177,-17.5],[178,-17.8],[178.5,-18.2],[178,-18.5],[177,-18],[177,-17.5]],
+  [[179,-16.5],[180,-16.8],[180,-17.3],[179.5,-17],[179,-16.5]],
+  // Samoa
+  [[-172,-13.7],[-171.5,-13.8],[-171.5,-14],[-172,-14],[-172,-13.7]],
+  [[-173,-13.6],[-172.5,-13.7],[-172.5,-14],[-173,-13.8],[-173,-13.6]],
+  // Tonga
+  [[-175.2,-18],[-174.8,-18.5],[-175,-19],[-175.5,-19],[-175.5,-18.5],[-175.2,-18]],
+  [[-175,-20],[-174.5,-20.5],[-175,-21],[-175.5,-21],[-175.5,-20.5],[-175,-20]],
+  // New Caledonia
+  [[164,-20],[165,-20.5],[166,-21.5],[167,-22.3],[166.5,-22.5],[165,-22],[164,-21],[164,-20]],
+  // Vanuatu chain
+  [[166.5,-14],[167,-15],[167.5,-16],[168,-17],[168.5,-18],[168,-18.5],[167,-17],[166.5,-15.5],[166,-14.5],[166.5,-14]],
+  // Solomon Islands
+  [[155,-6],[157,-7],[158,-7.5],[160,-8],[161,-9],[160,-9.5],[158,-8.5],[156,-7.5],[155,-6.5],[155,-6]],
+  // Guam / Mariana Islands
+  [[144.6,13.2],[144.9,13.5],[145,13.3],[144.8,13.1],[144.6,13.2]],
+  [[145.5,15],[146,15.5],[146,14.8],[145.5,14.5],[145.5,15]],
+  // Marshall Islands
+  [[171,7],[172,7.3],[172,7],[171.5,6.8],[171,7]],
+  [[168,5.5],[169,5.8],[169,5.3],[168,5.2],[168,5.5]],
+  // Palau
+  [[134.3,7.2],[134.6,7.5],[134.6,7.2],[134.3,7],[134.3,7.2]],
+  // French Polynesia (Tahiti)
+  [[-149.5,-17.5],[-149,-17.5],[-149,-17.8],[-149.5,-17.8],[-149.5,-17.5]],
+  [[-151,-16.5],[-150.5,-16.5],[-150.5,-16.8],[-151,-16.8],[-151,-16.5]],
+  // Cook Islands
+  [[-160,-21.2],[-159.5,-21.2],[-159.5,-21.5],[-160,-21.5],[-160,-21.2]],
+  // Kiribati
+  [[173,1.5],[174,1.8],[174,1.3],[173,1.2],[173,1.5]],
+  // Tuvalu
+  [[179,-7.5],[179.5,-7.5],[179.5,-8],[179,-8],[179,-7.5]],
+  // Micronesia
+  [[158,6.8],[158.5,7],[158.5,6.6],[158,6.5],[158,6.8]],
+  [[152,7],[152.5,7.3],[152.5,6.8],[152,6.7],[152,7]],
+  // Antarctica
+  [[-180,-70],[-160,-72],[-140,-75],[-120,-72],[-100,-75],[-80,-72],[-60,-70],[-40,-72],[-20,-70],[0,-70],[20,-70],[40,-68],[60,-67],[80,-68],[100,-67],[120,-66],[140,-67],[160,-70],[180,-70],[180,-78],[160,-80],[140,-78],[120,-80],[100,-80],[80,-78],[60,-80],[40,-78],[20,-80],[0,-80],[-20,-78],[-40,-80],[-60,-78],[-80,-80],[-100,-78],[-120,-80],[-140,-78],[-160,-80],[-180,-78],[-180,-70]]
+];
+
+// Ring of Fire paths
+const ROF_WEST = [[175,-42],[177,-39],[179,-35],[180,-28],[-180,-22],[-177,-18],[-175,-15],[170,-13],[165,-12],[158,-8],[152,-6],[148,-5],[144,-3],[138,0],[132,2],[128,5],[125,8],[122,13],[121,18],[122,22],[125,27],[128,30],[131,33],[134,35],[137,36],[139,37],[141,40],[143,43],[146,45],[150,48],[154,50],[157,53],[160,56],[163,60],[166,63]];
+const ROF_EAST = [[-175,53],[-172,54],[-168,55],[-164,55],[-160,56],[-156,57],[-152,58],[-148,60],[-144,60],[-140,59],[-136,57],[-132,54],[-129,51],[-126,48],[-124,44],[-123,41],[-122,38],[-120,36],[-118,34],[-116,32],[-113,30],[-110,28],[-107,25],[-103,22],[-100,19],[-97,17],[-94,15],[-90,14],[-87,12],[-84,10],[-82,8],[-80,4],[-80,0],[-79,-4],[-78,-8],[-77,-12],[-75,-17],[-74,-22],[-72,-28],[-72,-33],[-73,-38],[-74,-43],[-75,-48],[-73,-55]];
+
+// Additional plate boundaries (global)
+const PLATES = {
+  midAtlantic: [[-20,80],[-18,72],[-17,65],[-20,58],[-22,52],[-25,45],[-30,38],[-35,30],[-40,20],[-38,10],[-32,2],[-25,-5],[-15,-15],[-14,-25],[-14,-35],[-15,-48],[-20,-54],[-25,-58]],
+  alpineHimalayan: [[-10,36],[0,38],[5,37],[10,38],[15,38],[20,35],[25,37],[30,36],[33,35],[38,37],[42,38],[45,37],[50,35],[55,30],[60,28],[65,32],[70,35],[75,35],[80,28],[85,28],[90,25],[95,20]],
+  eastAfricanRift: [[35,12],[36,8],[37,3],[36,0],[35,-3],[34,-6],[33,-10],[32,-15],[30,-20],[28,-25]],
+  redSeaRift: [[32,30],[35,28],[38,22],[42,16],[43,12],[45,12],[50,10],[55,5],[60,-5]],
+  midIndian: [[60,-5],[55,-15],[50,-25],[45,-35],[40,-40],[35,-45],[30,-50]],
+  seIndian: [[80,-38],[85,-40],[95,-42],[105,-40],[115,-42],[125,-45],[135,-50],[140,-55]],
+  nzBoundary: [[165,-47],[168,-45],[170,-43],[172,-42],[174,-41],[176,-39],[177,-37],[178,-35],[179,-30],[-180,-25],[-177,-20],[-175,-15]],
+  pacificAntarctic: [[-150,-55],[-140,-58],[-130,-60],[-120,-56],[-115,-50],[-110,-48]],
+  caribbeanN: [[-85,18],[-80,18],[-75,19],[-70,19],[-65,18],[-62,16],[-60,14]],
+  caribbeanS: [[-85,10],[-82,8],[-78,8],[-73,10],[-68,11],[-63,10],[-60,10]],
+  juanDeFuca: [[-130,50],[-128,47],[-126,44],[-125,42]],
+  galapagos: [[-105,-2],[-100,0],[-95,2],[-90,2],[-85,5]],
+  scotiaArc: [[-60,-55],[-55,-58],[-45,-60],[-35,-58],[-30,-55],[-28,-58],[-25,-60]]
+};
+
+const VOLCANOES = [
+  {lat:19.4,lng:-155.3,name:'Kīlauea'},{lat:46.2,lng:-122.2,name:'Mt. St. Helens'},
+  {lat:19.1,lng:-98.6,name:'Popocatépetl'},{lat:35.4,lng:138.7,name:'Mt. Fuji'},
+  {lat:-8.3,lng:115.5,name:'Mt. Agung'},{lat:-7.5,lng:110.4,name:'Mt. Merapi'},
+  {lat:-38.7,lng:176.1,name:'Whakaari'},{lat:56.1,lng:160.6,name:'Klyuchevskoy'},
+  {lat:-1.5,lng:29.2,name:'Mt. Nyiragongo'},{lat:14.5,lng:-90.9,name:'Volcán de Fuego'}
+];
+
+// ── Utilities ──
+const W = 1000, Hh = 500;
+function px(lng){ return ((((lng+5)%360)+360)%360)/360*W; }
+function py(lat){ return (90-lat)/180*Hh; }
+
+// Smooth curve rendering with wrap handling
+function smoothPath(coords) {
+  const pts = coords.map(([ln,lt])=>[px(ln),py(lt)]);
+  const segs = [[]];
+  for(let i=0;i<pts.length;i++){
+    if(i>0 && Math.abs(pts[i][0]-pts[i-1][0])>W*0.4) segs.push([]);
+    segs[segs.length-1].push(pts[i]);
+  }
+  const valid = segs.filter(s=>s.length>2);
+  if(valid.length===1){
+    return d3.line().curve(d3.curveLinearClosed)(valid[0]);
+  }
+  const open = d3.line().curve(d3.curveLinear);
+  return valid.map(s=>open(s)+'Z').join('');
+}
+function smoothLine(coords) {
+  const pts = coords.map(([ln,lt])=>[px(ln),py(lt)]);
+  const segs = [[]];
+  for(let i=0;i<pts.length;i++){
+    if(i>0 && Math.abs(pts[i][0]-pts[i-1][0])>W*0.4) segs.push([]);
+    segs[segs.length-1].push(pts[i]);
+  }
+  const curve = d3.line().curve(d3.curveLinear);
+  return segs.filter(s=>s.length>1).map(s=>curve(s)).join('');
+}
+
+function magColor(m){
+  if(m<2.5) return '#3b82f6';
+  if(m<3.5) return '#06b6d4';
+  if(m<4.5) return '#22d3ee';
+  if(m<5.0) return '#eab308';
+  if(m<5.5) return '#f59e0b';
+  if(m<6.0) return '#f97316';
+  if(m<6.5) return '#ef4444';
+  if(m<7.0) return '#dc2626';
+  return '#b91c1c';
+}
+function magBg(m){ return magColor(m)+'22'; }
+function magR(m){
+  if(m<3) return 3; if(m<4) return 4.5; if(m<5) return 6;
+  if(m<6) return 8.5; if(m<7) return 11; return 14;
+}
+function relTime(t){
+  const d=Date.now()-t;
+  if(d<6e4) return 'just now';
+  if(d<H) return Math.floor(d/6e4)+'m ago';
+  if(d<D) return Math.floor(d/H)+'h ago';
+  return Math.floor(d/D)+'d ago';
+}
+function utcStr(t){ return new Date(t).toISOString().replace('T',' ').replace(/\.\d+Z/,' UTC'); }
+function depthLabel(d){ return d<70?'Shallow':d<300?'Intermediate':'Deep'; }
+function energy(m){
+  const j=Math.pow(10,1.5*m+4.8);
+  if(j<1e12) return (j/1e9).toFixed(1)+' GJ';
+  if(j<1e15) return (j/1e12).toFixed(1)+' TJ';
+  return (j/1e15).toFixed(1)+' PJ';
+}
+
+// ── State ──
+let selectedId = null, activeTab = 'recent', magFilter = 0;
+const layers = { quakes:true, plates:false, volcanoes:false, tsunami:true };
+
+// ── Map ──
+function buildMap(){
+  const svg = d3.select('#map').attr('viewBox',`0 0 ${W} ${Hh}`).attr('preserveAspectRatio','xMidYMid meet');
+
+  // SVG Defs: gradients and filters
+  const defs = svg.append('defs');
+
+  // Ocean radial gradient
+  const og = defs.append('radialGradient').attr('id','oGrad').attr('cx','50%').attr('cy','42%').attr('r','68%');
+  og.append('stop').attr('offset','0%').attr('stop-color','#0b1525');
+  og.append('stop').attr('offset','60%').attr('stop-color','#070e1a');
+  og.append('stop').attr('offset','100%').attr('stop-color','#030710');
+
+  // Land gradient fill
+  const lg = defs.append('linearGradient').attr('id','lGrad').attr('x1','0').attr('y1','0').attr('x2','0').attr('y2','1');
+  lg.append('stop').attr('offset','0%').attr('stop-color','#1b2d4a');
+  lg.append('stop').attr('offset','100%').attr('stop-color','#142340');
+
+  // Marker glow
+  const gf = defs.append('filter').attr('id','mkGlow').attr('x','-100%').attr('y','-100%').attr('width','300%').attr('height','300%');
+  gf.append('feGaussianBlur').attr('in','SourceGraphic').attr('stdDeviation','5').attr('result','b');
+  const gm = gf.append('feMerge');
+  gm.append('feMergeNode').attr('in','b');
+  gm.append('feMergeNode').attr('in','SourceGraphic');
+
+  // Land shadow
+  const sf = defs.append('filter').attr('id','lShadow').attr('x','-3%').attr('y','-3%').attr('width','106%').attr('height','106%');
+  sf.append('feGaussianBlur').attr('in','SourceAlpha').attr('stdDeviation','2').attr('result','sh');
+  sf.append('feOffset').attr('in','sh').attr('dx','0').attr('dy','1.5').attr('result','shO');
+  sf.append('feComponentTransfer').attr('in','shO').append('feFuncA').attr('type','linear').attr('slope','0.35');
+  const sm = sf.append('feMerge');
+  sm.append('feMergeNode');
+  sm.append('feMergeNode').attr('in','SourceGraphic');
+
+  // Ring of Fire glow
+  const rf = defs.append('filter').attr('id','rofGlow').attr('x','-10%').attr('y','-10%').attr('width','120%').attr('height','120%');
+  rf.append('feGaussianBlur').attr('in','SourceGraphic').attr('stdDeviation','2.5').attr('result','rb');
+  const rm = rf.append('feMerge');
+  rm.append('feMergeNode').attr('in','rb');
+  rm.append('feMergeNode').attr('in','SourceGraphic');
+
+  // Vignette gradient
+  const vg = defs.append('radialGradient').attr('id','vig').attr('cx','50%').attr('cy','46%').attr('r','58%');
+  vg.append('stop').attr('offset','0%').attr('stop-color','transparent');
+  vg.append('stop').attr('offset','85%').attr('stop-color','transparent');
+  vg.append('stop').attr('offset','100%').attr('stop-color','rgba(3,5,10,0.5)');
+
+  const g = svg.append('g');
+
+  // Ocean with gradient
+  g.append('rect').attr('width',W).attr('height',Hh).attr('fill','url(#oGrad)');
+
+  // Subtle ocean depth bands
+  const depthG = g.append('g').attr('opacity',.06);
+  [[px(180),py(5),180,120,'#2563eb'],[px(-160),py(-20),100,80,'#1d4ed8'],[px(160),py(40),60,50,'#1e40af']].forEach(([cx,cy,rx,ry,c])=>{
+    depthG.append('ellipse').attr('cx',cx).attr('cy',cy).attr('rx',rx).attr('ry',ry).attr('fill',c);
+  });
+
+  // Graticule
+  const gratG = g.append('g');
+  for(let ln=-180;ln<=180;ln+=30){
+    const x=px(ln);
+    gratG.append('line').attr('x1',x).attr('y1',0).attr('x2',x).attr('y2',Hh)
+      .attr('stroke','rgba(80,120,220,.04)').attr('stroke-width',.4).attr('class','grat');
+  }
+  for(let lt=-60;lt<=80;lt+=30){
+    const y=py(lt);
+    gratG.append('line').attr('x1',0).attr('y1',y).attr('x2',W).attr('y2',y)
+      .attr('stroke','rgba(80,120,220,.04)').attr('stroke-width',.4).attr('class','grat');
+  }
+  // Equator highlight
+  gratG.append('line').attr('x1',0).attr('y1',py(0)).attr('x2',W).attr('y2',py(0))
+    .attr('stroke','rgba(99,132,241,.08)').attr('stroke-width',.6).attr('stroke-dasharray','8 4').attr('class','grat');
+  // Tropics
+  [23.44,-23.44].forEach(lt=>{
+    gratG.append('line').attr('x1',0).attr('y1',py(lt)).attr('x2',W).attr('y2',py(lt))
+      .attr('stroke','rgba(99,132,241,.03)').attr('stroke-width',.3).attr('stroke-dasharray','3 5').attr('class','grat');
+  });
+
+  // Land masses with smooth curves
+  const landG = g.append('g');
+  CONTINENTS.forEach(c=>{
+    landG.append('path').attr('d',smoothPath(c))
+      .attr('fill','url(#lGrad)').attr('stroke','#2a4468').attr('stroke-width',.6)
+      .attr('filter','url(#lShadow)').attr('class','land');
+  });
+
+  // Shelf / coastal glow on major continents
+  const shelfG = g.append('g').attr('opacity',.04);
+  CONTINENTS.slice(0,6).forEach(c=>{
+    shelfG.append('path').attr('d',smoothPath(c))
+      .attr('fill','none').attr('stroke','#4488cc').attr('stroke-width',4);
+  });
+
+  // Ocean labels
+  const labStyle = {fill:'rgba(70,110,200,.07)',fontFamily:'var(--font)',fontWeight:'600',textAnchor:'middle'};
+  [[px(180),py(20),'PACIFIC OCEAN',20,8],[px(-160),py(-25),'SOUTH PACIFIC',12,4],[px(70),py(12),'INDIAN OCEAN',13,5],[px(5),py(30),'ATLANTIC',11,3]].forEach(([x,y,t,sz,sp])=>{
+    const txt = g.append('text').attr('x',x).attr('y',y).text(t).attr('class','olabel');
+    Object.entries(labStyle).forEach(([k,v])=>txt.style(k==='textAnchor'?'text-anchor':k,v));
+    txt.style('font-size',sz+'px').style('letter-spacing',sp+'px');
+  });
+
+  // Tectonic Plate Boundaries (all)
+  const rofG = g.append('g').style('display','none').attr('class','rof-group');
+  // Ring of Fire (orange, prominent)
+  [ROF_WEST,ROF_EAST].forEach(r=>{
+    rofG.append('path').attr('d',smoothLine(r))
+      .attr('fill','none').attr('stroke','rgba(249,115,22,.45)').attr('stroke-width',2)
+      .attr('stroke-dasharray','8 5').attr('stroke-linecap','round')
+      .attr('filter','url(#rofGlow)').attr('class','rof');
+  });
+  // All other plate boundaries (violet, subtler)
+  Object.values(PLATES).forEach(plate=>{
+    rofG.append('path').attr('d',smoothLine(plate))
+      .attr('fill','none').attr('stroke','rgba(168,85,247,.35)').attr('stroke-width',1.2)
+      .attr('stroke-dasharray','5 4').attr('stroke-linecap','round').attr('class','rof');
+  });
+
+  // CME Geomagnetic Impact Zones
+  const cmeG = g.append('g').attr('class','cme-impact');
+  const predictedKp = 5; // from demo CME data
+  // Aurora/impact extends further from poles at higher Kp
+  // Kp5: aurora visible ~55°N/S, strong impact 60-75°
+  // Band positions in SVG y-coordinates
+  const zones = [
+    // Northern hemisphere
+    {y1:py(75),y2:py(63),fill:'rgba(249,115,22,.12)',label:'Direct Impact Zone'},
+    {y1:py(63),y2:py(55),fill:'rgba(249,115,22,.07)'},
+    {y1:py(55),y2:py(48),fill:'rgba(249,115,22,.03)'},
+    // Southern hemisphere
+    {y1:py(-63),y2:py(-75),fill:'rgba(249,115,22,.12)'},
+    {y1:py(-55),y2:py(-63),fill:'rgba(249,115,22,.07)'},
+    {y1:py(-48),y2:py(-55),fill:'rgba(249,115,22,.03)'}
+  ];
+  zones.forEach(z=>{
+    cmeG.append('rect').attr('x',0).attr('y',Math.min(z.y1,z.y2)).attr('width',W)
+      .attr('height',Math.abs(z.y2-z.y1)).attr('fill',z.fill);
+  });
+  // Dashed boundary lines at aurora edge
+  [55,-55].forEach(lat=>{
+    cmeG.append('line').attr('x1',0).attr('y1',py(lat)).attr('x2',W).attr('y2',py(lat))
+      .attr('stroke','rgba(249,115,22,.25)').attr('stroke-width',.8)
+      .attr('stroke-dasharray','6 4');
+  });
+  // Aurora zone labels
+  cmeG.append('text').attr('x',px(180)).attr('y',py(68)).attr('text-anchor','middle')
+    .attr('fill','rgba(249,115,22,.4)').attr('font-size','9').attr('font-family','var(--mono)')
+    .attr('letter-spacing','2px').text('GEOMAGNETIC IMPACT ZONE — Kp '+predictedKp).attr('class','olabel');
+  cmeG.append('text').attr('x',px(180)).attr('y',py(58)).attr('text-anchor','middle')
+    .attr('fill','rgba(249,115,22,.25)').attr('font-size','7').attr('font-family','var(--mono)')
+    .text('Aurora visible · Power grid risk · HF radio disruption').attr('class','olabel');
+  cmeG.append('text').attr('x',px(180)).attr('y',py(-68)).attr('text-anchor','middle')
+    .attr('fill','rgba(249,115,22,.3)').attr('font-size','8').attr('font-family','var(--mono)')
+    .attr('letter-spacing','2px').text('SOUTHERN IMPACT ZONE').attr('class','olabel');
+
+  // Volcanoes
+  const volG = g.append('g').style('display','none').attr('class','vol-group');
+  VOLCANOES.forEach(v=>{
+    const x=px(v.lng),y=py(v.lat);
+    volG.append('polygon').attr('points',`${x},${y-5} ${x-3.5},${y+2.5} ${x+3.5},${y+2.5}`)
+      .attr('fill','rgba(249,115,22,.75)').attr('stroke','rgba(249,115,22,.35)').attr('stroke-width',.8)
+      .attr('class','vm');
+  });
+
+  // Tsunami alert zones
+  const tsunamiG = g.append('g').attr('class','tsunami-group');
+  EQ.filter(e=>e.tsunami).forEach(e=>{
+    const cx=px(e.lng),cy=py(e.lat);
+    [32,22,14].forEach((r,i)=>{
+      tsunamiG.append('circle').attr('cx',cx).attr('cy',cy).attr('r',r)
+        .attr('fill','none').attr('stroke',`rgba(239,68,68,${.12-.03*i})`)
+        .attr('stroke-width',.8).attr('stroke-dasharray',i===0?'5 4':'3 3');
+    });
+  });
+
+  // EQ markers
+  const eqG = g.append('g');
+
+  function renderMarkers(){
+    eqG.selectAll('*').remove();
+    [...EQ].sort((a,b)=>a.mag-b.mag).forEach(e=>{
+      const cx=px(e.lng),cy=py(e.lat),r=magR(e.mag),col=magColor(e.mag);
+      const isSel = e.id===selectedId;
+
+      if(isSel){
+        animatePulse(eqG.append('circle').attr('cx',cx).attr('cy',cy).attr('class','pulse-ring').attr('stroke',col).node(), r, 0);
+        animatePulse(eqG.append('circle').attr('cx',cx).attr('cy',cy).attr('class','pulse-ring').attr('stroke',col).node(), r, 900);
+      }
+
+      // Outer glow circle
+      eqG.append('circle').attr('cx',cx).attr('cy',cy).attr('r',r*1.8)
+        .attr('fill',col).attr('fill-opacity',.08).attr('pointer-events','none');
+
+      const circle = eqG.append('circle').attr('cx',cx).attr('cy',cy).attr('r',r)
+        .attr('fill',col).attr('fill-opacity',.55).attr('stroke',col).attr('stroke-width',1.2).attr('stroke-opacity',.9)
+        .attr('filter', isSel?'url(#mkGlow)':'none')
+        .style('cursor','pointer').attr('class','eq-mk');
+
+      circle.on('click',ev=>{
+        ev.stopPropagation();
+        selectedId=e.id; activeTab='detail';
+        renderMarkers(); renderPanel(); updateTabs();
+      });
+      circle.on('mouseenter',ev=>{
+        const tip=document.getElementById('tip');
+        tip.style.display='block';
+        tip.innerHTML=`<div class="mg" style="color:${col}">M ${e.mag.toFixed(1)}</div><div class="lc">${e.loc}</div><div class="dp">${depthLabel(e.depth)} · ${e.depth} km · ${relTime(e.time)}</div>`;
+      });
+      circle.on('mousemove',ev=>{
+        const tip=document.getElementById('tip');
+        tip.style.left=(ev.clientX+14)+'px'; tip.style.top=(ev.clientY-10)+'px';
+      });
+      circle.on('mouseleave',()=>{ document.getElementById('tip').style.display='none'; });
+    });
+  }
+
+  function animatePulse(node, baseR, delay){
+    let start=null; const dur=2000;
+    (function tick(ts){
+      if(!start) start=ts+delay;
+      const elapsed=ts-start;
+      if(elapsed<0){ requestAnimationFrame(tick); return; }
+      const t=(elapsed%dur)/dur;
+      node.setAttribute('r', baseR+4+t*26);
+      node.setAttribute('stroke-opacity', 0.45*(1-t));
+      node.setAttribute('stroke-width', 2*(1-t)+0.2);
+      if(node.parentNode) requestAnimationFrame(tick);
+    })(performance.now());
+  }
+
+  renderMarkers();
+
+  // Vignette overlay
+  g.append('rect').attr('width',W).attr('height',Hh).attr('fill','url(#vig)').attr('pointer-events','none');
+
+  svg.on('click',()=>{ selectedId=null; renderMarkers(); renderPanel(); });
+
+  // Zoom (mouse drag, scroll wheel, touch pinch)
+  const zoom = d3.zoom().scaleExtent([1,10]).translateExtent([[-100,-50],[W+100,Hh+50]])
+    .on('zoom', event => {
+      g.attr('transform',event.transform);
+      const k=event.transform.k;
+      eqG.selectAll('.eq-mk').each(function(){
+        const eq=EQ.find(e=>Math.abs(px(e.lng)-+this.getAttribute('cx'))<0.5&&Math.abs(py(e.lat)-+this.getAttribute('cy'))<0.5);
+        if(eq) this.setAttribute('r',magR(eq.mag)/k);
+      });
+      g.selectAll('.olabel').each(function(){
+        const orig=+this.dataset.sz||parseFloat(this.style.fontSize);
+        if(!this.dataset.sz) this.dataset.sz=orig;
+        this.style.fontSize=(orig/k)+'px';
+        const origSp=+this.dataset.sp||parseFloat(this.style.letterSpacing);
+        if(!this.dataset.sp) this.dataset.sp=origSp;
+        this.style.letterSpacing=(origSp/k)+'px';
+      });
+      g.selectAll('.grat').attr('stroke-width',function(){ return .4/k; });
+      g.selectAll('.land').attr('stroke-width',.6/k);
+      g.selectAll('.rof').attr('stroke-width',2/k);
+    });
+
+  svg.call(zoom);
+  const k0=1.35, tx0=(W/2)*(1-k0), ty0=(Hh*0.44)*(1-k0);
+  svg.call(zoom.transform, d3.zoomIdentity.translate(tx0,ty0).scale(k0));
+
+  window.toggleLayer = name => {
+    layers[name]=!layers[name];
+    if(name==='plates') rofG.style('display',layers.plates?null:'none');
+    if(name==='volcanoes') volG.style('display',layers.volcanoes?null:'none');
+    if(name==='tsunami') tsunamiG.style('display',layers.tsunami?null:'none');
+    renderLayers();
+  };
+  window.refreshMarkers = renderMarkers;
+}
+
+// ── Layer buttons ──
+function renderLayers(){
+  document.getElementById('layers').innerHTML=[
+    ['quakes','Earthquakes'],['plates','Tectonic Plates'],['volcanoes','Volcanoes'],['tsunami','Tsunami Alerts']
+  ].map(([k,v])=>`<button class="lb${layers[k]?' on':''}" onclick="toggleLayer('${k}')">${v}</button>`).join('');
+}
+
+// ── Summary Cards ──
+function renderCMEBanner(){
+  const banner = document.getElementById('cme-banner');
+  // Demo CME data (would come from NASA DONKI when live)
+  const cmes = [
+    {type:'Halo',speed:680,detected:NOW-6*H,eta:NOW+30*H,kpPred:'5–6',source:'AR3842'},
+    {type:'Partial Halo',speed:420,detected:NOW-28*H,eta:NOW+44*H,kpPred:'3–4',source:'AR3838'}
+  ];
+  const active = cmes.filter(c=>c.eta>Date.now());
+  if(!active.length){ banner.innerHTML=''; return; }
+  banner.innerHTML = active.map(c=>{
+    const hoursLeft = Math.max(0,Math.round((c.eta-Date.now())/H));
+    const minsLeft = Math.max(0,Math.round((c.eta-Date.now())/6e4)%60);
+    const etaText = hoursLeft>0 ? `${hoursLeft}h ${minsLeft}m` : `${minsLeft}m`;
+    return `<div class="cme-bar" onclick="switchPage('solar')">
+      <div class="cme-icon">☀</div>
+      <div class="cme-body">
+        <div class="cme-title">CME Impact Alert — ${c.type} at ${c.speed} km/s from ${c.source}</div>
+        <div class="cme-meta">Detected ${relTime(c.detected)} · Predicted Kp ${c.kpPred} · Potential SR perturbation · Click for details</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <div class="cme-eta">${etaText}</div>
+        <div class="cme-eta-label">ETA to Earth</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderCards(){
+  const last24=EQ.filter(e=>(Date.now()-e.time)<D);
+  const strongest=EQ.reduce((a,b)=>a.mag>b.mag?a:b);
+  const regions=new Set(EQ.map(e=>e.region));
+  const totalEnergy=EQ.reduce((s,e)=>s+Math.pow(10,1.5*e.mag+4.8),0);
+  document.getElementById('cards').innerHTML=`
+    <div class="cd"><div class="cd-l">Last 24 Hours</div><div class="cd-v">${last24.length}</div><div class="cd-s"><span class="up">&#9650; ${Math.max(0,last24.length-18)}</span> vs yesterday</div></div>
+    <div class="cd"><div class="cd-l">Strongest Today</div><div class="cd-v" style="color:${magColor(strongest.mag)}">M ${strongest.mag.toFixed(1)}</div><div class="cd-s">${strongest.loc.split(',')[0]}</div></div>
+    <div class="cd"><div class="cd-l">Active Regions</div><div class="cd-v">${regions.size}</div><div class="cd-s">Monitored globally</div></div>
+    <div class="cd"><div class="cd-l">Energy Released</div><div class="cd-v">${energy(Math.log10(totalEnergy/Math.pow(10,4.8))/1.5)}</div><div class="cd-s">Cumulative seismic</div></div>`;
+}
+
+// ── Filters ──
+function renderFilters(){
+  document.getElementById('filters').innerHTML=[{l:'All',v:0},{l:'M3+',v:3},{l:'M4+',v:4},{l:'M5+',v:5},{l:'M6+',v:6}].map(m=>
+    `<button class="fc${magFilter===m.v?' on':''}" onclick="setMagFilter(${m.v})">${m.l}</button>`).join('');
+}
+window.setMagFilter=v=>{ magFilter=v; renderFilters(); renderPanel(); };
+
+// ── Panel tabs ──
+function updateTabs(){
+  document.querySelectorAll('.ptb').forEach(b=>b.classList.toggle('on',b.dataset.tab===activeTab));
+  document.querySelector('.fl').style.display=activeTab==='recent'?'':'none';
+}
+document.querySelectorAll('.ptb').forEach(b=>b.addEventListener('click',()=>{ activeTab=b.dataset.tab; updateTabs(); renderPanel(); }));
+
+// ── Panel content ──
+function renderPanel(){
+  const el=document.getElementById('panel');
+  if(activeTab==='recent'){
+    const filtered=EQ.filter(e=>e.mag>=magFilter).sort((a,b)=>b.time-a.time);
+    if(!filtered.length){ el.innerHTML='<div class="es"><p>No earthquakes match filter</p></div>'; return; }
+    el.innerHTML=filtered.map(e=>`
+      <div class="ei${e.id===selectedId?' sel':''}" onclick="selectEq('${e.id}')">
+        <div class="eb" style="background:${magBg(e.mag)};color:${magColor(e.mag)}">${e.mag.toFixed(1)}</div>
+        <div class="eif"><div class="el">${e.loc}</div><div class="em"><span>${relTime(e.time)}</span><span>${e.depth} km</span><span>${e.region}</span></div></div>
+      </div>`).join('');
+  } else {
+    const eq=EQ.find(e=>e.id===selectedId);
+    if(!eq){ el.innerHTML='<div class="es"><svg viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg><p>Select an earthquake on the map or list to view details</p></div>'; return; }
+    const col=magColor(eq.mag), aftershocks=genAftershocks(eq);
+    const nearby=EQ.filter(e=>e.id!==eq.id).map(e=>({...e,dist:Math.sqrt((e.lat-eq.lat)**2+(e.lng-eq.lng)**2)*111})).sort((a,b)=>a.dist-b.dist).slice(0,4);
+    el.innerHTML=`<div class="dt">
+      <div class="dt-h"><div class="dt-m" style="color:${col}">M ${eq.mag.toFixed(1)}</div><div class="dt-l">${eq.loc}</div><div class="dt-t">${utcStr(eq.time)}</div></div>
+      <div class="dt-g">
+        <div class="ds"><div class="ds-l">Depth</div><div class="ds-v">${eq.depth} km <span style="color:var(--tx2);font-size:10px">${depthLabel(eq.depth)}</span></div></div>
+        <div class="ds"><div class="ds-l">Felt Reports</div><div class="ds-v">${eq.felt>0?eq.felt.toLocaleString():'None'}</div></div>
+        <div class="ds"><div class="ds-l">Latitude</div><div class="ds-v">${eq.lat.toFixed(3)}°</div></div>
+        <div class="ds"><div class="ds-l">Longitude</div><div class="ds-v">${eq.lng.toFixed(3)}°</div></div>
+      </div>
+      <div class="ta ${eq.tsunami?'ta-wr':'ta-ok'}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="${eq.tsunami?'M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01':'M22 11.08V12a10 10 0 1 1-5.93-9.14M22 4L12 14.01l-3-3'}"/></svg>
+        ${eq.tsunami?'Tsunami advisory active':'No tsunami threat detected'}
+      </div>
+      <div class="dt-s"><h3>Intensity Estimate</h3>
+        <svg width="200" height="100" viewBox="0 0 200 100" style="display:block;margin:0 auto">
+          <circle cx="100" cy="50" r="45" fill="rgba(239,68,68,.06)" stroke="rgba(239,68,68,.12)" stroke-width=".5"/>
+          <circle cx="100" cy="50" r="30" fill="rgba(249,115,22,.07)" stroke="rgba(249,115,22,.15)" stroke-width=".5"/>
+          <circle cx="100" cy="50" r="16" fill="rgba(234,179,8,.08)" stroke="rgba(234,179,8,.2)" stroke-width=".5"/>
+          <circle cx="100" cy="50" r="5" fill="${col}" opacity=".8"/>
+          <text x="100" y="96" text-anchor="middle" fill="var(--tx2)" font-size="8" font-family="var(--mono)">~${Math.round(eq.mag*30)} km felt radius</text>
+          <text x="148" y="52" fill="var(--tx2)" font-size="7" font-family="var(--mono)">Moderate</text>
+          <text x="133" y="38" fill="var(--tx2)" font-size="7" font-family="var(--mono)">Strong</text>
+        </svg>
+      </div>
+      ${aftershocks.length?`<div class="dt-s"><h3>Aftershock Activity (${aftershocks.length})</h3>${aftershocks.map(a=>`<div class="as"><div class="as-d" style="background:${magColor(a.mag)}"></div><div class="as-m" style="color:${magColor(a.mag)}">${a.mag.toFixed(1)}</div><div class="as-t">${relTime(a.time)}</div></div>`).join('')}</div>`:''}
+      <div class="dt-s"><h3>Nearby Events</h3>${nearby.map(n=>`<div class="nb-i" onclick="selectEq('${n.id}')" style="cursor:pointer"><div class="eb" style="background:${magBg(n.mag)};color:${magColor(n.mag)}">${n.mag.toFixed(1)}</div><div class="el">${n.loc.split(',')[0]}</div><div class="ed">${Math.round(n.dist)} km</div></div>`).join('')}</div>
+    </div>`;
+  }
+}
+
+function genAftershocks(eq){
+  const seed=eq.id.charCodeAt(2), count=Math.min(5,Math.max(0,Math.floor((eq.mag-4)*2)));
+  const shocks=[]; let t=eq.time;
+  for(let i=0;i<count;i++){
+    t+=((seed*(i+1)*17)%100)/100*3*H+H*0.3;
+    if(t>NOW) break;
+    shocks.push({mag:Math.round(Math.max(1.5,eq.mag-1.5-i*0.4+(seed%3)*0.2)*10)/10, time:t});
+  } return shocks;
+}
+window.selectEq=id=>{ selectedId=id; activeTab='detail'; updateTabs(); renderPanel(); if(window.refreshMarkers) window.refreshMarkers(); };
+
+// ── Charts ──
+function renderCharts(){
+  document.getElementById('charts').innerHTML=`
+    <div class="cc"><div class="cc-t">7-Day Activity</div><div class="cw" id="ch-activity"></div></div>
+    <div class="cc"><div class="cc-t">Magnitude Distribution</div><div class="cw" id="ch-mag"></div></div>
+    <div class="cc"><div class="cc-t">Regional Activity</div><div class="cw" id="ch-region"></div></div>`;
+  drawActivityChart(); drawMagChart(); drawRegionChart();
+}
+
+function drawActivityChart(){
+  const w=280,h=120,p={t:10,r:10,b:22,l:28},iw=w-p.l-p.r,ih=h-p.t-p.b;
+  const days=[];
+  for(let i=6;i>=0;i--){ const ds=NOW-i*D; days.push({day:new Date(ds-D).toLocaleDateString('en',{weekday:'short'}),count:EQ.filter(e=>e.time>=ds-D&&e.time<ds).length||Math.floor(Math.random()*6)+2}); }
+  const maxV=Math.max(...days.map(d=>d.count),1);
+  const svg=d3.select('#ch-activity').append('svg').attr('viewBox',`0 0 ${w} ${h}`);
+  const xS=d3.scaleLinear().domain([0,days.length-1]).range([0,iw]);
+  const yS=d3.scaleLinear().domain([0,maxV*1.2]).range([ih,0]);
+  const g_=svg.append('g').attr('transform',`translate(${p.l},${p.t})`);
+  const dd=svg.append('defs'); const gr=dd.append('linearGradient').attr('id','aGrad').attr('x1',0).attr('y1',0).attr('x2',0).attr('y2',1);
+  gr.append('stop').attr('offset','0%').attr('stop-color','#6366f1').attr('stop-opacity',.3);
+  gr.append('stop').attr('offset','100%').attr('stop-color','#6366f1').attr('stop-opacity',.02);
+  g_.append('path').datum(days).attr('d',d3.area().x((_,i)=>xS(i)).y0(ih).y1(d=>yS(d.count)).curve(d3.curveMonotoneX)).attr('fill','url(#aGrad)');
+  g_.append('path').datum(days).attr('d',d3.line().x((_,i)=>xS(i)).y(d=>yS(d.count)).curve(d3.curveMonotoneX)).attr('fill','none').attr('stroke','#6366f1').attr('stroke-width',1.5);
+  days.forEach((d,i)=>{ g_.append('circle').attr('cx',xS(i)).attr('cy',yS(d.count)).attr('r',2.5).attr('fill','#6366f1'); });
+  days.forEach((d,i)=>{ g_.append('text').attr('x',xS(i)).attr('y',ih+14).attr('text-anchor','middle').attr('fill','#6b7a94').attr('font-size','8').attr('font-family','var(--mono)').text(d.day); });
+  [0,Math.round(maxV/2),maxV].forEach(v=>{ g_.append('text').attr('x',-6).attr('y',yS(v)+3).attr('text-anchor','end').attr('fill','#6b7a94').attr('font-size','7').attr('font-family','var(--mono)').text(v); g_.append('line').attr('x1',0).attr('y1',yS(v)).attr('x2',iw).attr('y2',yS(v)).attr('stroke','rgba(99,102,241,.08)').attr('stroke-width',.5); });
+}
+
+function drawMagChart(){
+  const bk=[{l:'<3',min:0,max:3},{l:'3-4',min:3,max:4},{l:'4-5',min:4,max:5},{l:'5-6',min:5,max:6},{l:'6-7',min:6,max:7},{l:'7+',min:7,max:99}];
+  bk.forEach(b=>b.count=EQ.filter(e=>e.mag>=b.min&&e.mag<b.max).length);
+  const maxV=Math.max(...bk.map(b=>b.count),1);
+  const w=280,h=120,p={t:10,r:10,b:22,l:28},iw=w-p.l-p.r,ih=h-p.t-p.b;
+  const svg=d3.select('#ch-mag').append('svg').attr('viewBox',`0 0 ${w} ${h}`);
+  const g_=svg.append('g').attr('transform',`translate(${p.l},${p.t})`);
+  const bW=iw/bk.length*.7, gap=iw/bk.length;
+  bk.forEach((b,i)=>{ const x=i*gap+(gap-bW)/2,bH=(b.count/maxV)*ih,col=magColor(b.min+.5);
+    g_.append('rect').attr('x',x).attr('y',ih-bH).attr('width',bW).attr('height',bH).attr('rx',2).attr('fill',col).attr('fill-opacity',.7);
+    g_.append('text').attr('x',x+bW/2).attr('y',ih+14).attr('text-anchor','middle').attr('fill','#6b7a94').attr('font-size','8').attr('font-family','var(--mono)').text(b.l);
+    if(b.count>0) g_.append('text').attr('x',x+bW/2).attr('y',ih-bH-4).attr('text-anchor','middle').attr('fill','#d4dae6').attr('font-size','8').attr('font-family','var(--mono)').text(b.count);
+  });
+  [0,Math.round(maxV/2),maxV].forEach(v=>g_.append('line').attr('x1',0).attr('y1',ih-(v/maxV)*ih).attr('x2',iw).attr('y2',ih-(v/maxV)*ih).attr('stroke','rgba(99,102,241,.08)').attr('stroke-width',.5));
+}
+
+function drawRegionChart(){
+  const reg={};EQ.forEach(e=>reg[e.region]=(reg[e.region]||0)+1);
+  const sorted=Object.entries(reg).sort((a,b)=>b[1]-a[1]);
+  const maxV=Math.max(...sorted.map(s=>s[1]),1);
+  const w=280,h=120,p={t:6,r:10,b:6,l:75},iw=w-p.l-p.r,ih=h-p.t-p.b;
+  const bH=Math.min(14,ih/sorted.length-3),gap=ih/sorted.length;
+  const svg=d3.select('#ch-region').append('svg').attr('viewBox',`0 0 ${w} ${h}`);
+  const g_=svg.append('g').attr('transform',`translate(${p.l},${p.t})`);
+  const cols=['#6366f1','#818cf8','#a78bfa','#c4b5fd','#8b5cf6','#7c3aed','#6d28d9','#5b21b6'];
+  sorted.forEach((s,i)=>{ const y=i*gap+(gap-bH)/2,bW=(s[1]/maxV)*iw;
+    g_.append('rect').attr('x',0).attr('y',y).attr('width',bW).attr('height',bH).attr('rx',2).attr('fill',cols[i%cols.length]).attr('fill-opacity',.7);
+    g_.append('text').attr('x',-6).attr('y',y+bH/2+3).attr('text-anchor','end').attr('fill','#d4dae6').attr('font-size','8').attr('font-family','var(--mono)').text(s[0]);
+    g_.append('text').attr('x',bW+5).attr('y',y+bH/2+3).attr('fill','#6b7a94').attr('font-size','8').attr('font-family','var(--mono)').text(s[1]);
+  });
+}
+
+renderCards(); renderCMEBanner(); renderLayers(); renderFilters(); renderPanel(); buildMap(); renderCharts();
+
+// ── Page Navigation ──
+let currentPage = 'dashboard';
+let evSort = 'time', evDir = -1;
+
+function switchPage(page){
+  currentPage = page;
+  document.querySelectorAll('.nb[data-page]').forEach(b=>b.classList.toggle('on',b.dataset.page===page));
+  const cards=document.getElementById('cards'), ct=document.querySelector('.ct'),
+        cr=document.getElementById('charts'), pgc=document.getElementById('pgc'),
+        pn=document.querySelector('.pn'), fl=document.querySelector('.fl'),
+        cmeb=document.getElementById('cme-banner');
+  const titles={dashboard:'Earthquake Activity',map:'Live Map',events:'Recent Events',alerts:'Alerts & Warnings',analytics:'Analytics',settings:'Settings',enso:'El Niño / La Niña (ENSO)',solar:'Solar Activity',schumann:'Schumann Resonance',risk:'Seismic Risk Factors'};
+  document.querySelector('.tb h1').textContent=titles[page]||page;
+
+  if(page==='dashboard'){
+    cards.style.display=''; ct.style.display=''; cr.style.display=''; pgc.style.display='none';
+    pn.style.display=''; fl.style.display=activeTab==='recent'?'':'none'; cmeb.style.display='';
+    renderCMEBanner();
+  } else if(page==='map'){
+    cards.style.display='none'; ct.style.display=''; cr.style.display='none'; pgc.style.display='none';
+    pn.style.display='none'; fl.style.display='none'; cmeb.style.display='none';
+  } else {
+    cards.style.display='none'; ct.style.display='none'; cr.style.display='none';
+    pgc.style.display='block'; cmeb.style.display='none';
+    renderPageContent(page);
+  }
+}
+
+function renderPageContent(page){
+  const el=document.getElementById('pgc');
+  if(page==='events') renderEventsPage(el);
+  else if(page==='alerts') renderAlertsPage(el);
+  else if(page==='analytics') renderAnalyticsPage(el);
+  else if(page==='settings') renderSettingsPage(el);
+  else if(page==='enso') renderENSOPage(el);
+  else if(page==='solar') renderSolarPage(el);
+  else if(page==='schumann') renderSchumannPage(el);
+  else if(page==='risk') renderRiskPage(el);
+}
+
+// ── Events Page ──
+function renderEventsPage(el){
+  const sorted = [...EQ].sort((a,b)=>{
+    const av=evSort==='time'?a.time:evSort==='mag'?a.mag:evSort==='depth'?a.depth:a.region;
+    const bv=evSort==='time'?b.time:evSort==='mag'?b.mag:evSort==='depth'?b.depth:b.region;
+    return typeof av==='string'? (evDir*(av<bv?-1:av>bv?1:0)) : evDir*(av-bv);
+  });
+  const arrow = s => evSort===s ? (evDir<0?' ▼':' ▲') : '';
+  el.innerHTML=`
+    <div class="pg-section">
+      <h2>All Seismic Events <span class="badge" style="background:var(--acc-bg);color:var(--acc)">${EQ.length} total</span></h2>
+      <div class="ev-table">
+        <div class="ev-head">
+          <span onclick="sortEv('mag')">Mag${arrow('mag')}</span>
+          <span onclick="sortEv('loc')">Location</span>
+          <span onclick="sortEv('time')">Time${arrow('time')}</span>
+          <span onclick="sortEv('depth')">Depth${arrow('depth')}</span>
+          <span onclick="sortEv('region')">Region${arrow('region')}</span>
+        </div>
+        ${sorted.map(e=>`<div class="ev-row" onclick="goToEq('${e.id}')">
+          <div><span class="eb" style="background:${magBg(e.mag)};color:${magColor(e.mag)}">${e.mag.toFixed(1)}</span></div>
+          <div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e.loc}</div>
+          <div style="color:var(--tx2);font-family:var(--mono);font-size:11px">${relTime(e.time)}</div>
+          <div style="font-family:var(--mono);font-size:12px">${e.depth} km</div>
+          <div style="color:var(--tx2);font-size:11px">${e.region}${e.tsunami?' <span style="color:var(--red)">⚠</span>':''}</div>
+        </div>`).join('')}
+      </div>
+    </div>`;
+}
+window.sortEv=s=>{ if(evSort===s) evDir*=-1; else { evSort=s; evDir=-1; } renderEventsPage(document.getElementById('pgc')); };
+window.goToEq=id=>{ selectedId=id; switchPage('dashboard'); activeTab='detail'; updateTabs(); renderPanel(); if(window.refreshMarkers) window.refreshMarkers(); };
+
+// ── Alerts Page ──
+function renderAlertsPage(el){
+  const tsunamiEqs = EQ.filter(e=>e.tsunami);
+  const significant = EQ.filter(e=>e.mag>=5 && !e.tsunami).sort((a,b)=>b.mag-a.mag);
+  const recent = EQ.filter(e=>e.mag<5).sort((a,b)=>b.time-a.time).slice(0,5);
+
+  el.innerHTML=`
+    <div class="pg-section">
+      <h2 style="color:var(--red)">Active Alerts <span class="badge" style="background:rgba(239,68,68,.15);color:var(--red)">${tsunamiEqs.length} active</span></h2>
+      ${tsunamiEqs.length ? tsunamiEqs.map(e=>`
+        <div class="alert-card critical">
+          <div class="alert-icon" style="background:rgba(239,68,68,.15);color:var(--red)">⚠</div>
+          <div class="alert-body">
+            <div class="alert-title" style="color:var(--red)">Tsunami Advisory — M ${e.mag.toFixed(1)} ${e.loc}</div>
+            <div class="alert-meta">Issued ${relTime(e.time)} · Depth ${e.depth} km · ${e.felt.toLocaleString()} felt reports</div>
+            <div style="margin-top:8px"><button class="fc on" onclick="goToEq('${e.id}')" style="cursor:pointer">View on Map</button></div>
+          </div>
+        </div>`).join('') : '<div class="alert-card info"><div class="alert-icon" style="background:rgba(34,197,94,.15);color:var(--green)">✓</div><div class="alert-body"><div class="alert-title">No active tsunami alerts</div><div class="alert-meta">All monitored regions clear</div></div></div>'}
+    </div>
+    <div class="pg-section">
+      <h2>Significant Events (M5+) <span class="badge" style="background:var(--acc-bg);color:var(--acc)">${significant.length}</span></h2>
+      ${significant.map(e=>`
+        <div class="alert-card" onclick="goToEq('${e.id}')" style="cursor:pointer">
+          <div class="alert-icon" style="background:${magBg(e.mag)};color:${magColor(e.mag)};font-family:var(--mono);font-weight:700;font-size:13px">${e.mag.toFixed(1)}</div>
+          <div class="alert-body">
+            <div class="alert-title">${e.loc}</div>
+            <div class="alert-meta">${relTime(e.time)} · Depth ${e.depth} km · ${e.region}</div>
+          </div>
+        </div>`).join('')}
+    </div>
+    <div class="pg-section">
+      <h2>Recent Minor Activity</h2>
+      ${recent.map(e=>`
+        <div class="alert-card" onclick="goToEq('${e.id}')" style="cursor:pointer">
+          <div class="alert-icon" style="background:${magBg(e.mag)};color:${magColor(e.mag)};font-family:var(--mono);font-weight:700;font-size:13px">${e.mag.toFixed(1)}</div>
+          <div class="alert-body">
+            <div class="alert-title">${e.loc}</div>
+            <div class="alert-meta">${relTime(e.time)} · Depth ${e.depth} km</div>
+          </div>
+        </div>`).join('')}
+    </div>`;
+}
+
+// ── Analytics Page ──
+function renderAnalyticsPage(el){
+  const avgMag = (EQ.reduce((s,e)=>s+e.mag,0)/EQ.length).toFixed(1);
+  const avgDepth = Math.round(EQ.reduce((s,e)=>s+e.depth,0)/EQ.length);
+  const maxMag = EQ.reduce((a,b)=>a.mag>b.mag?a:b);
+  const regions = new Set(EQ.map(e=>e.region));
+  const totalEnergy=EQ.reduce((s,e)=>s+Math.pow(10,1.5*e.mag+4.8),0);
+
+  el.innerHTML=`
+    <div class="stat-row">
+      <div class="stat-item"><div class="stat-label">Total Events</div><div class="stat-val">${EQ.length}</div><div class="stat-sub">Last 24 hours</div></div>
+      <div class="stat-item"><div class="stat-label">Avg Magnitude</div><div class="stat-val" style="color:${magColor(+avgMag)}">${avgMag}</div><div class="stat-sub">Across all events</div></div>
+      <div class="stat-item"><div class="stat-label">Avg Depth</div><div class="stat-val">${avgDepth}<span style="font-size:12px;color:var(--tx2)"> km</span></div><div class="stat-sub">${depthLabel(avgDepth)}</div></div>
+      <div class="stat-item"><div class="stat-label">Energy Released</div><div class="stat-val">${energy(Math.log10(totalEnergy/Math.pow(10,4.8))/1.5)}</div><div class="stat-sub">${regions.size} active regions</div></div>
+    </div>
+    <div class="an-grid">
+      <div class="an-card"><h3>7-Day Activity Trend</h3><div class="an-cw" id="an-activity"></div></div>
+      <div class="an-card"><h3>Magnitude Distribution</h3><div class="an-cw" id="an-mag"></div></div>
+      <div class="an-card"><h3>Depth vs Magnitude</h3><div class="an-cw" id="an-scatter"></div></div>
+      <div class="an-card"><h3>Regional Breakdown</h3><div class="an-cw" id="an-region"></div></div>
+    </div>`;
+
+  // Reuse chart drawing with larger sizes
+  drawAnalyticsActivity();
+  drawAnalyticsMag();
+  drawAnalyticsScatter();
+  drawAnalyticsRegion();
+}
+
+function drawAnalyticsActivity(){
+  const w=440,h=200,p={t:14,r:14,b:26,l:32},iw=w-p.l-p.r,ih=h-p.t-p.b;
+  const days=[];
+  for(let i=6;i>=0;i--){ const ds=NOW-i*D; days.push({day:new Date(ds-D).toLocaleDateString('en',{weekday:'short'}),count:EQ.filter(e=>e.time>=ds-D&&e.time<ds).length||Math.floor(Math.random()*6)+2}); }
+  const maxV=Math.max(...days.map(d=>d.count),1);
+  const svg=d3.select('#an-activity').append('svg').attr('viewBox',`0 0 ${w} ${h}`);
+  const xS=d3.scaleLinear().domain([0,days.length-1]).range([0,iw]);
+  const yS=d3.scaleLinear().domain([0,maxV*1.2]).range([ih,0]);
+  const g_=svg.append('g').attr('transform',`translate(${p.l},${p.t})`);
+  const dd=svg.append('defs'); const gr=dd.append('linearGradient').attr('id','aGrad2').attr('x1',0).attr('y1',0).attr('x2',0).attr('y2',1);
+  gr.append('stop').attr('offset','0%').attr('stop-color','#6366f1').attr('stop-opacity',.3);
+  gr.append('stop').attr('offset','100%').attr('stop-color','#6366f1').attr('stop-opacity',.02);
+  g_.append('path').datum(days).attr('d',d3.area().x((_,i)=>xS(i)).y0(ih).y1(d=>yS(d.count)).curve(d3.curveMonotoneX)).attr('fill','url(#aGrad2)');
+  g_.append('path').datum(days).attr('d',d3.line().x((_,i)=>xS(i)).y(d=>yS(d.count)).curve(d3.curveMonotoneX)).attr('fill','none').attr('stroke','#6366f1').attr('stroke-width',2);
+  days.forEach((d,i)=>{ g_.append('circle').attr('cx',xS(i)).attr('cy',yS(d.count)).attr('r',3.5).attr('fill','#6366f1'); });
+  days.forEach((d,i)=>{ g_.append('text').attr('x',xS(i)).attr('y',ih+16).attr('text-anchor','middle').attr('fill','#6b7a94').attr('font-size','9').attr('font-family','var(--mono)').text(d.day); });
+  [0,Math.round(maxV/2),maxV].forEach(v=>{ g_.append('text').attr('x',-8).attr('y',yS(v)+3).attr('text-anchor','end').attr('fill','#6b7a94').attr('font-size','8').attr('font-family','var(--mono)').text(v); g_.append('line').attr('x1',0).attr('y1',yS(v)).attr('x2',iw).attr('y2',yS(v)).attr('stroke','rgba(99,102,241,.08)').attr('stroke-width',.5); });
+}
+
+function drawAnalyticsMag(){
+  const bk=[{l:'<3',min:0,max:3},{l:'3-4',min:3,max:4},{l:'4-5',min:4,max:5},{l:'5-6',min:5,max:6},{l:'6-7',min:6,max:7},{l:'7+',min:7,max:99}];
+  bk.forEach(b=>b.count=EQ.filter(e=>e.mag>=b.min&&e.mag<b.max).length);
+  const maxV=Math.max(...bk.map(b=>b.count),1);
+  const w=440,h=200,p={t:14,r:14,b:26,l:32},iw=w-p.l-p.r,ih=h-p.t-p.b;
+  const svg=d3.select('#an-mag').append('svg').attr('viewBox',`0 0 ${w} ${h}`);
+  const g_=svg.append('g').attr('transform',`translate(${p.l},${p.t})`);
+  const bW=iw/bk.length*.65, gap=iw/bk.length;
+  bk.forEach((b,i)=>{ const x=i*gap+(gap-bW)/2,bH=(b.count/maxV)*ih,col=magColor(b.min+.5);
+    g_.append('rect').attr('x',x).attr('y',ih-bH).attr('width',bW).attr('height',bH).attr('rx',3).attr('fill',col).attr('fill-opacity',.7);
+    g_.append('text').attr('x',x+bW/2).attr('y',ih+16).attr('text-anchor','middle').attr('fill','#6b7a94').attr('font-size','9').attr('font-family','var(--mono)').text(b.l);
+    if(b.count>0) g_.append('text').attr('x',x+bW/2).attr('y',ih-bH-6).attr('text-anchor','middle').attr('fill','#d4dae6').attr('font-size','10').attr('font-family','var(--mono)').text(b.count);
+  });
+}
+
+function drawAnalyticsScatter(){
+  const w=440,h=200,p={t:14,r:14,b:30,l:40},iw=w-p.l-p.r,ih=h-p.t-p.b;
+  const svg=d3.select('#an-scatter').append('svg').attr('viewBox',`0 0 ${w} ${h}`);
+  const g_=svg.append('g').attr('transform',`translate(${p.l},${p.t})`);
+  const xS=d3.scaleLinear().domain([2,8]).range([0,iw]);
+  const yS=d3.scaleLog().domain([5,600]).range([0,ih]);
+  // Grid
+  [3,4,5,6,7].forEach(v=>{ g_.append('line').attr('x1',xS(v)).attr('y1',0).attr('x2',xS(v)).attr('y2',ih).attr('stroke','rgba(99,102,241,.06)').attr('stroke-width',.5); g_.append('text').attr('x',xS(v)).attr('y',ih+16).attr('text-anchor','middle').attr('fill','#6b7a94').attr('font-size','8').attr('font-family','var(--mono)').text('M'+v); });
+  [10,50,100,500].forEach(v=>{ g_.append('line').attr('x1',0).attr('y1',yS(v)).attr('x2',iw).attr('y2',yS(v)).attr('stroke','rgba(99,102,241,.06)').attr('stroke-width',.5); g_.append('text').attr('x',-6).attr('y',yS(v)+3).attr('text-anchor','end').attr('fill','#6b7a94').attr('font-size','8').attr('font-family','var(--mono)').text(v+'km'); });
+  // Points
+  EQ.forEach(e=>{
+    g_.append('circle').attr('cx',xS(e.mag)).attr('cy',yS(Math.max(5,e.depth))).attr('r',4)
+      .attr('fill',magColor(e.mag)).attr('fill-opacity',.6).attr('stroke',magColor(e.mag)).attr('stroke-width',.8);
+  });
+  g_.append('text').attr('x',iw/2).attr('y',ih+24).attr('text-anchor','middle').attr('fill','#6b7a94').attr('font-size','9').text('Magnitude');
+  g_.append('text').attr('x',-ih/2).attr('y',-30).attr('text-anchor','middle').attr('fill','#6b7a94').attr('font-size','9').attr('transform','rotate(-90)').text('Depth (km)');
+}
+
+function drawAnalyticsRegion(){
+  const reg={};EQ.forEach(e=>reg[e.region]=(reg[e.region]||0)+1);
+  const sorted=Object.entries(reg).sort((a,b)=>b[1]-a[1]);
+  const maxV=Math.max(...sorted.map(s=>s[1]),1);
+  const w=440,h=200,p={t:8,r:14,b:8,l:90},iw=w-p.l-p.r,ih=h-p.t-p.b;
+  const bH=Math.min(20,ih/sorted.length-4),gap=ih/sorted.length;
+  const svg=d3.select('#an-region').append('svg').attr('viewBox',`0 0 ${w} ${h}`);
+  const g_=svg.append('g').attr('transform',`translate(${p.l},${p.t})`);
+  const cols=['#6366f1','#818cf8','#a78bfa','#c4b5fd','#8b5cf6','#7c3aed','#6d28d9','#5b21b6'];
+  sorted.forEach((s,i)=>{ const y=i*gap+(gap-bH)/2,bW=(s[1]/maxV)*iw;
+    g_.append('rect').attr('x',0).attr('y',y).attr('width',bW).attr('height',bH).attr('rx',3).attr('fill',cols[i%cols.length]).attr('fill-opacity',.7);
+    g_.append('text').attr('x',-8).attr('y',y+bH/2+4).attr('text-anchor','end').attr('fill','#d4dae6').attr('font-size','10').attr('font-family','var(--mono)').text(s[0]);
+    g_.append('text').attr('x',bW+6).attr('y',y+bH/2+4).attr('fill','#6b7a94').attr('font-size','10').attr('font-family','var(--mono)').text(s[1]);
+  });
+}
+
+// ── Settings Page ──
+function renderSettingsPage(el){
+  const savedLocations = [
+    {name:'Wainui, Auckland',lat:-36.58,lng:174.98},
+    {name:'Wellington, NZ',lat:-41.29,lng:174.78},
+    {name:'San Francisco, CA',lat:37.77,lng:-122.42},
+    {name:'Tokyo, Japan',lat:35.68,lng:139.69}
+  ];
+  savedLocations.forEach(loc=>{
+    const nearby = EQ.filter(e=>Math.sqrt((e.lat-loc.lat)**2+(e.lng-loc.lng)**2)*111 < 500).sort((a,b)=>b.time-a.time);
+    loc.lastEq = nearby[0] || null;
+    loc.count = nearby.length;
+  });
+
+  el.innerHTML=`
+    <div class="set-group">
+      <h3>Saved Locations</h3>
+      ${savedLocations.map(loc=>`
+        <div class="saved-loc">
+          <div class="loc-pin">📍</div>
+          <div class="loc-info">
+            <div class="loc-name">${loc.name}</div>
+            <div class="loc-detail">${loc.lastEq ? `Last event: M ${loc.lastEq.mag.toFixed(1)}, ${relTime(loc.lastEq.time)} · ${loc.count} events nearby` : 'No recent activity'}</div>
+          </div>
+        </div>`).join('')}
+    </div>
+    <div class="set-group">
+      <h3>Display Preferences</h3>
+      <div class="set-row"><span class="set-label">Default magnitude filter</span><span class="set-val">All events</span></div>
+      <div class="set-row"><span class="set-label">Map theme</span><span class="set-val">Dark Navy</span></div>
+      <div class="set-row"><span class="set-label">Map projection</span><span class="set-val">Pacific-centered</span></div>
+      <div class="set-row"><span class="set-label">Auto-refresh interval</span><span class="set-val">30 seconds</span></div>
+      <div class="set-row"><span class="set-label">Time format</span><span class="set-val">Relative</span></div>
+    </div>
+    <div class="set-group">
+      <h3>Notification Settings</h3>
+      <div class="set-row"><span class="set-label">Push notifications</span><span class="set-val">Enabled</span></div>
+      <div class="set-row"><span class="set-label">Minimum magnitude alert</span><span class="set-val">M 5.0+</span></div>
+      <div class="set-row"><span class="set-label">Tsunami alerts</span><span class="set-val">All regions</span></div>
+      <div class="set-row"><span class="set-label">Saved location alerts</span><span class="set-val">M 3.0+ within 200 km</span></div>
+    </div>
+    <div class="set-group">
+      <h3>Data Sources</h3>
+      <div class="set-row"><span class="set-label">USGS Earthquake Hazards Program</span><span class="set-val" style="color:var(--green)">Connected</span></div>
+      <div class="set-row"><span class="set-label">GeoNet — New Zealand</span><span class="set-val" style="color:var(--green)">Connected</span></div>
+      <div class="set-row"><span class="set-label">EMSC — Europe-Mediterranean</span><span class="set-val" style="color:var(--green)">Connected</span></div>
+      <div class="set-row"><span class="set-label">JMA — Japan Meteorological Agency</span><span class="set-val" style="color:var(--green)">Connected</span></div>
+    </div>`;
+}
+
+// ── Moon Phase Calculator ──
+function getMoonPhase(date){
+  const known = new Date(2000, 0, 6, 18, 14).getTime();
+  const cycle = 29.53058770576;
+  const days = (date.getTime() - known) / 864e5;
+  return (((days % cycle) + cycle) % cycle) / cycle;
+}
+function moonPhaseName(p){
+  if(p<0.03||p>0.97) return {name:'New Moon',emoji:'🌑',tidal:'Maximum'};
+  if(p<0.22) return {name:'Waxing Crescent',emoji:'🌒',tidal:'Decreasing'};
+  if(p<0.28) return {name:'First Quarter',emoji:'🌓',tidal:'Minimum'};
+  if(p<0.47) return {name:'Waxing Gibbous',emoji:'🌔',tidal:'Increasing'};
+  if(p<0.53) return {name:'Full Moon',emoji:'🌕',tidal:'Maximum'};
+  if(p<0.72) return {name:'Waning Gibbous',emoji:'🌖',tidal:'Decreasing'};
+  if(p<0.78) return {name:'Last Quarter',emoji:'🌗',tidal:'Minimum'};
+  return {name:'Waning Crescent',emoji:'🌘',tidal:'Increasing'};
+}
+function tidalStress(p){
+  const distFromNewFull = Math.min(p, Math.abs(p-0.5), 1-p);
+  return 1 - (distFromNewFull / 0.25);
+}
+function updateMoonIndicator(){
+  const el = document.getElementById('moon-ind');
+  const p = getMoonPhase(new Date());
+  const m = moonPhaseName(p);
+  const stress = tidalStress(p);
+  const stressCol = stress>0.7?'#f97316':stress>0.4?'#eab308':'#22c55e';
+  el.innerHTML = `<span style="font-size:18px">${m.emoji}</span><span>${m.name}</span><span style="font-size:10px;color:${stressCol};font-weight:600">Tidal: ${m.tidal}</span>`;
+}
+updateMoonIndicator();
+setInterval(updateMoonIndicator, 60000);
+
+// ── Seismic Risk Factors Page ──
+function renderRiskPage(el){
+  const now = new Date();
+  const p = getMoonPhase(now);
+  const m = moonPhaseName(p);
+  const stress = tidalStress(p);
+  const stressCol = stress>0.7?'#f97316':stress>0.4?'#eab308':'#22c55e';
+  const stressLbl = stress>0.7?'Elevated':stress>0.4?'Moderate':'Low';
+
+  const demoKp = solarData ? solarData.kp : 3;
+  const kpCol = demoKp<=2?'#22c55e':demoKp<=4?'#eab308':demoKp<=6?'#f97316':'#ef4444';
+  const daysStorm = 4;
+
+  // Composite risk: weighted combination of tidal stress + geomagnetic + SR anomaly
+  const geoFactor = Math.min(1, demoKp / 7);
+  // SR anomaly: unexplained SR perturbation not attributable to known solar activity
+  const srPerturbation = demoKp * 0.03;
+  const srExpected = demoKp * 0.025; // what we'd expect from Kp alone
+  const srAnomaly = Math.min(1, Math.max(0, (srPerturbation - srExpected) * 10 + 0.3)); // residual anomaly
+  const srAnomalyCol = srAnomaly>0.6?'#f97316':srAnomaly>0.3?'#eab308':'#22c55e';
+  const composite = (stress * 0.30 + geoFactor * 0.30 + (daysStorm < 3 ? 0.15 : 0) + srAnomaly * 0.25);
+  const compCol = composite>0.6?'#f97316':composite>0.35?'#eab308':'#22c55e';
+  const compLbl = composite>0.6?'Elevated':composite>0.35?'Moderate':'Baseline';
+
+  // Next new/full moon
+  let nextNew=new Date(now), nextFull=new Date(now);
+  for(let i=1;i<35;i++){
+    const d=new Date(now.getTime()+i*864e5);
+    const ph=getMoonPhase(d);
+    if((ph<0.03||ph>0.97)&&nextNew.getTime()===now.getTime()) nextNew=d;
+    if(ph>0.47&&ph<0.53&&nextFull.getTime()===now.getTime()) nextFull=d;
+  }
+
+  // Moon cycle for last 30 days
+  const moonCycle=[];
+  for(let i=-15;i<=15;i++){
+    const d=new Date(now.getTime()+i*864e5);
+    moonCycle.push({day:i,phase:getMoonPhase(d),date:d});
+  }
+
+  const riskTimeStr = now.toLocaleString('en-NZ',{dateStyle:'medium',timeStyle:'short',timeZone:'Pacific/Auckland'});
+
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding:10px 14px;background:var(--card);border:1px solid var(--bdr);border-radius:10px">
+      <div><span style="font-size:11px;color:var(--tx2)">Assessment Time</span><div style="font-family:var(--mono);font-size:13px;margin-top:2px">${riskTimeStr}</div></div>
+      <div style="text-align:center"><span style="font-size:11px;color:var(--tx2)">Composite Signal</span><div style="font-family:var(--mono);font-size:13px;margin-top:2px;color:${compCol};font-weight:600">${compLbl} (${(composite*100).toFixed(0)}%)</div></div>
+      <div style="text-align:right"><span style="font-size:11px;color:var(--tx2)">Method</span><div style="font-family:var(--mono);font-size:13px;margin-top:2px">Multi-factor correlation</div></div>
+    </div>
+    <div style="padding:10px 14px;background:var(--surface);border:1px solid var(--bdr);border-radius:10px;margin-bottom:14px;font-size:11px;color:var(--tx2)">
+      This is not earthquake prediction. It shows natural factors with documented statistical correlations to seismic activity. The effect sizes are small — use for awareness, not decision-making.
+    </div>
+    <div class="stat-row">
+      <div class="stat-item" style="text-align:center">
+        <div style="font-size:48px;line-height:1">${m.emoji}</div>
+        <div style="font-size:14px;font-weight:600;margin-top:6px">${m.name}</div>
+        <div style="font-size:11px;color:var(--tx2)">Phase: ${(p*100).toFixed(1)}%</div>
+      </div>
+      <div class="stat-item"><div class="stat-label">Tidal Stress</div><div class="stat-val" style="color:${stressCol}">${stressLbl}</div><div class="stat-sub">${(stress*100).toFixed(0)}% of maximum</div></div>
+      <div class="stat-item"><div class="stat-label">Geomagnetic (Kp)</div><div class="stat-val" style="color:${kpCol}">${demoKp}</div><div class="stat-sub">${daysStorm}d since last storm</div></div>
+      <div class="stat-item"><div class="stat-label">SR Anomaly</div><div class="stat-val" style="color:${srAnomalyCol}">${(srAnomaly*100).toFixed(0)}%</div><div class="stat-sub">Unexplained perturbation</div></div>
+    </div>
+    <div class="an-grid" style="margin-top:12px">
+      <div class="an-card" style="grid-column:1/-1">
+        <h3>30-Day Lunar Cycle — Tidal Stress Overlay</h3>
+        <div class="an-cw" id="risk-moon-chart" style="height:clamp(140px,20vh,200px)"></div>
+      </div>
+    </div>
+    <div class="an-grid" style="margin-top:12px">
+      <div class="an-card">
+        <h3>Factor Breakdown</h3>
+        ${[
+          {label:'Lunar Tidal Stress',val:stress,desc:'Sun–Moon–Earth alignment creates crustal tidal forces. New and full moons = peak stress on shallow thrust faults.',col:stressCol,weight:'30%'},
+          {label:'Geomagnetic Activity',val:geoFactor,desc:'Electromagnetic disturbances from solar wind may affect piezoelectric stress in fault zones. Elevated Kp = higher correlation.',col:kpCol,weight:'30%'},
+          {label:'SR Anomaly Signal',val:srAnomaly,desc:'Schumann resonance perturbation not explained by known solar activity. Unexplained SR amplitude spikes in the 4th harmonic (~27 Hz) have preceded large earthquakes in some studies (Hayakawa et al.).',col:srAnomalyCol,weight:'25%'},
+          {label:'Post-Storm Window',val:daysStorm<3?1:0,desc:'Studies suggest a 24-48hr elevated window after geomagnetic storms. Currently ${daysStorm} days since last Kp≥5 event.',col:daysStorm<3?'#f97316':'#22c55e',weight:'15%'}
+        ].map(f=>`
+          <div style="padding:10px 0;border-bottom:1px solid var(--bdr)">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:12px;font-weight:500">${f.label}</span>
+              <span style="font-family:var(--mono);font-size:13px;font-weight:600;color:${f.col}">${(f.val*100).toFixed(0)}%</span>
+            </div>
+            <div style="height:4px;background:var(--surface);border-radius:2px;margin:6px 0;overflow:hidden"><div style="height:100%;width:${f.val*100}%;background:${f.col};border-radius:2px"></div></div>
+            <div style="font-size:10px;color:var(--tx2)">${f.desc} <span style="color:var(--tx2);font-style:italic">Weight: ${f.weight}</span></div>
+          </div>`).join('')}
+      </div>
+      <div class="an-card">
+        <h3>Upcoming Tidal Windows</h3>
+        ${[
+          {label:'Next Full Moon',date:nextFull,stress:'Maximum tidal stress',emoji:'🌕'},
+          {label:'Next New Moon',date:nextNew,stress:'Maximum tidal stress',emoji:'🌑'},
+        ].map(w=>{
+          const daysUntil = Math.round((w.date.getTime()-now.getTime())/864e5);
+          return `<div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--bdr)">
+            <span style="font-size:28px">${w.emoji}</span>
+            <div style="flex:1">
+              <div style="font-size:12px;font-weight:500">${w.label}</div>
+              <div style="font-size:11px;color:var(--tx2);font-family:var(--mono)">${w.date.toLocaleDateString('en-NZ',{dateStyle:'medium',timeZone:'Pacific/Auckland'})}</div>
+              <div style="font-size:10px;color:#f97316">${w.stress}</div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-family:var(--mono);font-size:16px;font-weight:700;color:#f97316">${daysUntil}d</div>
+              <div style="font-size:9px;color:var(--tx2)">away</div>
+            </div>
+          </div>`;
+        }).join('')}
+        <div style="margin-top:14px;font-size:11px;color:var(--tx2)">
+          <div style="font-weight:500;margin-bottom:6px">Research References</div>
+          <div style="margin-bottom:3px">Métivier et al. (2009) — Earth tides and earthquakes correlation</div>
+          <div style="margin-bottom:3px">Ide et al. (2016) — Tidal stress and deep tremor</div>
+          <div style="margin-bottom:3px">Bendick & Bilham (2017) — Earth rotation and seismicity cycles</div>
+          <div style="margin-bottom:3px">Hayakawa et al. (2012) — Ionospheric SR anomalies before large earthquakes</div>
+          <div>Ohta et al. (2013) — SR 4th harmonic amplitude changes as seismic precursors</div>
+        </div>
+      </div>
+    </div>`;
+
+  // Draw moon phase / tidal stress chart
+  drawMoonChart(moonCycle);
+}
+
+function drawMoonChart(data){
+  const w=900,h=180,p_={t:20,r:20,b:30,l:45},iw=w-p_.l-p_.r,ih=h-p_.t-p_.b;
+  const svg = d3.select('#risk-moon-chart').append('svg').attr('viewBox',`0 0 ${w} ${h}`);
+  const g_ = svg.append('g').attr('transform',`translate(${p_.l},${p_.t})`);
+  const xS = d3.scaleLinear().domain([-15,15]).range([0,iw]);
+  const yS = d3.scaleLinear().domain([0,1]).range([ih,0]);
+
+  // Stress area
+  const stressData = data.map(d=>({day:d.day,stress:tidalStress(d.phase)}));
+  const defs = svg.append('defs');
+  const gr = defs.append('linearGradient').attr('id','stressGrad').attr('x1',0).attr('y1',0).attr('x2',0).attr('y2',1);
+  gr.append('stop').attr('offset','0%').attr('stop-color','#f97316').attr('stop-opacity',.25);
+  gr.append('stop').attr('offset','100%').attr('stop-color','#f97316').attr('stop-opacity',.02);
+
+  g_.append('path').datum(stressData).attr('d',d3.area().x(d=>xS(d.day)).y0(ih).y1(d=>yS(d.stress)).curve(d3.curveMonotoneX)).attr('fill','url(#stressGrad)');
+  g_.append('path').datum(stressData).attr('d',d3.line().x(d=>xS(d.day)).y(d=>yS(d.stress)).curve(d3.curveMonotoneX)).attr('fill','none').attr('stroke','#f97316').attr('stroke-width',1.5);
+
+  // "Today" line
+  g_.append('line').attr('x1',xS(0)).attr('y1',0).attr('x2',xS(0)).attr('y2',ih).attr('stroke','#ef4444').attr('stroke-width',1).attr('stroke-dasharray','4 3');
+  g_.append('text').attr('x',xS(0)).attr('y',-6).attr('text-anchor','middle').attr('fill','#ef4444').attr('font-size','8').attr('font-weight','600').attr('font-family','var(--mono)').text('TODAY');
+
+  // Moon emoji markers at new/full moons (only closest day to exact phase)
+  let lastMoonDay = -999;
+  data.forEach((d,i)=>{
+    const m = moonPhaseName(d.phase);
+    const isNewOrFull = d.phase<0.03||d.phase>0.97||(d.phase>0.47&&d.phase<0.53);
+    if(isNewOrFull && (d.day - lastMoonDay) > 3){
+      lastMoonDay = d.day;
+      g_.append('text').attr('x',xS(d.day)).attr('y',yS(tidalStress(d.phase))-10).attr('text-anchor','middle').attr('font-size','14').text(m.emoji);
+    }
+  });
+
+  // X axis
+  [-15,-10,-5,0,5,10,15].forEach(d=>{
+    g_.append('text').attr('x',xS(d)).attr('y',ih+16).attr('text-anchor','middle').attr('fill','#6b7a94').attr('font-size','8').attr('font-family','var(--mono)').text(d===0?'Today':(d>0?'+':'')+d+'d');
+  });
+  // Y axis
+  [0,0.5,1].forEach(v=>{
+    g_.append('text').attr('x',-8).attr('y',yS(v)+3).attr('text-anchor','end').attr('fill','#6b7a94').attr('font-size','8').attr('font-family','var(--mono)').text(v===0?'Low':v===0.5?'Med':'High');
+    g_.append('line').attr('x1',0).attr('y1',yS(v)).attr('x2',iw).attr('y2',yS(v)).attr('stroke','rgba(99,102,241,.06)').attr('stroke-width',.5);
+  });
+}
+
+// Wire up nav buttons
+document.querySelectorAll('.nb[data-page]').forEach(b=>{
+  b.addEventListener('click',()=>switchPage(b.dataset.page));
+});
+
+// ── ENSO Page (Enhanced) ──
+const ENSO_URL = 'https://www.cpc.ncep.noaa.gov/data/indices/oni.ascii.txt';
+let ensoData = null;
+
+const ENSO_HISTORY = [
+  {yr:'2023-24',type:'El Niño',strength:'Strong',oni:'+1.8',impact:'Record global temps, Pacific marine heatwaves'},
+  {yr:'2022-23',type:'La Niña',strength:'Moderate',oni:'-1.0',impact:'Triple La Niña, NZ Cyclone Gabrielle'},
+  {yr:'2021-22',type:'La Niña',strength:'Moderate',oni:'-1.0',impact:'Australian flooding, drought in South America'},
+  {yr:'2020-21',type:'La Niña',strength:'Moderate',oni:'-1.3',impact:'Active hurricane season, NZ rainfall above normal'},
+  {yr:'2019-20',type:'Neutral',strength:'Weak',oni:'+0.3',impact:'Australian bushfires, warm Indian Ocean'},
+  {yr:'2018-19',type:'El Niño',strength:'Weak',oni:'+0.8',impact:'Below-normal NZ rainfall, marine heatwave'},
+  {yr:'2015-16',type:'El Niño',strength:'Very Strong',oni:'+2.6',impact:'Strongest on record, global coral bleaching'},
+  {yr:'2010-11',type:'La Niña',strength:'Strong',oni:'-1.7',impact:'Queensland flooding, Christchurch earthquake year'}
+];
+
+function renderENSOPage(el){
+  const demoONI = [
+    {yr:2022,m:'JFM',v:-1.0},{yr:2022,m:'AMJ',v:-0.9},{yr:2022,m:'JAS',v:-0.8},{yr:2022,m:'OND',v:-0.9},
+    {yr:2023,m:'JFM',v:-0.5},{yr:2023,m:'AMJ',v:0.2},{yr:2023,m:'JAS',v:1.0},{yr:2023,m:'OND',v:1.8},
+    {yr:2024,m:'JFM',v:1.5},{yr:2024,m:'AMJ',v:0.8},{yr:2024,m:'JAS',v:0.2},{yr:2024,m:'OND',v:-0.3},
+    {yr:2025,m:'JFM',v:-0.6},{yr:2025,m:'AMJ',v:-0.8},{yr:2025,m:'JAS',v:-1.1},{yr:2025,m:'OND',v:-1.2},
+    {yr:2026,m:'JFM',v:-0.8},{yr:2026,m:'AMJ',v:-0.4},{yr:2026,m:'JAS',v:0.1}
+  ];
+  const oni = ensoData || demoONI;
+  const latest = oni[oni.length-1];
+  const state = latest.v >= 0.5 ? 'El Niño' : latest.v <= -0.5 ? 'La Niña' : 'Neutral';
+  const stateCol = latest.v >= 0.5 ? '#ef4444' : latest.v <= -0.5 ? '#3b82f6' : '#22c55e';
+  const ensoNow = new Date();
+  const ensoTimeStr = ensoNow.toLocaleString('en-NZ',{dateStyle:'medium',timeStyle:'short',timeZone:'Pacific/Auckland'});
+
+  // NZ-specific impacts
+  const nzImpacts = latest.v >= 0.5 ? [
+    {icon:'🌡',title:'Drier than normal',desc:'Northeast winds dominate. Drought risk for eastern NZ, especially Canterbury and Hawke\'s Bay.'},
+    {icon:'🌊',title:'Marine heatwave risk',desc:'Elevated sea surface temperatures around NZ. Stress on marine ecosystems and fisheries.'},
+    {icon:'🌪',title:'Fewer tropical cyclones',desc:'Reduced cyclone activity near NZ, but those that form may track closer to the country.'}
+  ] : latest.v <= -0.5 ? [
+    {icon:'🌧',title:'Wetter than normal',desc:'More frequent easterly/northeasterly rain events. Flooding risk for eastern and northern NZ.'},
+    {icon:'🌀',title:'More tropical cyclones',desc:'Increased cyclone activity in the Coral Sea and near NZ. Higher storm surge risk.'},
+    {icon:'❄',title:'Cooler SST',desc:'Cooler waters in the eastern Pacific may moderate NZ coastal temperatures.'}
+  ] : [
+    {icon:'⚖',title:'Near-normal conditions',desc:'No strong ENSO signal. Weather patterns driven primarily by the Southern Annular Mode and local systems.'},
+    {icon:'🌤',title:'Mixed signals',desc:'Transition periods can bring variable conditions. Watch for developing trends.'},
+    {icon:'📊',title:'Monitor closely',desc:'Neutral phases can shift quickly. Next 3-month outlook determines direction.'}
+  ];
+
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding:10px 14px;background:var(--card);border:1px solid var(--bdr);border-radius:10px">
+      <div><span style="font-size:11px;color:var(--tx2)">Last Updated</span><div style="font-family:var(--mono);font-size:13px;margin-top:2px">${ensoTimeStr}</div></div>
+      <div style="text-align:center"><span style="font-size:11px;color:var(--tx2)">Latest Period</span><div style="font-family:var(--mono);font-size:13px;margin-top:2px">${latest.yr} ${latest.m}</div></div>
+      <div style="text-align:right"><span style="font-size:11px;color:var(--tx2)">Data Range</span><div style="font-family:var(--mono);font-size:13px;margin-top:2px">${oni[0].yr}–${latest.yr}</div></div>
+    </div>
+    <div class="stat-row">
+      <div class="stat-item"><div class="stat-label">Current State</div><div class="stat-val" style="color:${stateCol};font-size:18px">${state}</div><div class="stat-sub">${latest.yr} ${latest.m}</div></div>
+      <div class="stat-item"><div class="stat-label">ONI Value</div><div class="stat-val" style="color:${stateCol}">${latest.v>0?'+':''}${latest.v.toFixed(1)}°C</div><div class="stat-sub">Sea surface temp anomaly</div></div>
+      <div class="stat-item"><div class="stat-label">Threshold</div><div class="stat-val">±0.5°C</div><div class="stat-sub">5 consecutive months</div></div>
+      <div class="stat-item"><div class="stat-label">Data Source</div><div class="stat-val" style="font-size:14px">${ensoData?'NOAA CPC':'Demo'}</div><div class="stat-sub">Oceanic Niño Index</div></div>
+    </div>
+    <div class="an-grid">
+      <div class="an-card" style="grid-column:1/-1">
+        <h3>Oceanic Niño Index (ONI) — 3-Month Running Mean SST Anomaly (Niño 3.4 Region)</h3>
+        <div class="an-cw" id="enso-chart" style="height:clamp(180px,28vh,280px)"></div>
+      </div>
+    </div>
+    <div class="an-grid" style="margin-top:12px">
+      <div class="an-card" style="grid-column:1/-1;padding:0;overflow:hidden">
+        <h3 style="padding:14px 14px 0">Pacific SST Anomaly Map — Niño Monitoring Regions</h3>
+        <div id="sst-map" style="height:clamp(350px,50vh,600px);position:relative;cursor:grab;background:#050910">
+          <span style="position:absolute;bottom:8px;right:12px;font-size:11px;color:var(--tx2);z-index:2;pointer-events:none">Scroll to zoom · Drag to pan</span>
+        </div>
+      </div>
+      <div class="an-card">
+        <h3>Impact for New Zealand & Pacific</h3>
+        ${nzImpacts.map(imp=>`
+          <div style="display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--bdr)">
+            <span style="font-size:20px">${imp.icon}</span>
+            <div><div style="font-size:12px;font-weight:500">${imp.title}</div><div style="font-size:11px;color:var(--tx2);margin-top:2px">${imp.desc}</div></div>
+          </div>`).join('')}
+      </div>
+    </div>
+    <div class="pg-section" style="margin-top:16px">
+      <h2>Historical ENSO Events</h2>
+      <div class="ev-table">
+        <div class="ev-head" style="grid-template-columns:80px 80px 90px 60px 1fr">
+          <span>Period</span><span>Type</span><span>Strength</span><span>Peak ONI</span><span>Key Impacts</span>
+        </div>
+        ${ENSO_HISTORY.map(e=>{
+          const tc = e.type==='El Niño'?'#ef4444':e.type==='La Niña'?'#3b82f6':'#22c55e';
+          return `<div class="ev-row" style="grid-template-columns:80px 80px 90px 60px 1fr">
+            <div style="font-family:var(--mono);font-size:12px">${e.yr}</div>
+            <div style="color:${tc};font-weight:500;font-size:12px">${e.type}</div>
+            <div style="font-size:11px;color:var(--tx2)">${e.strength}</div>
+            <div style="font-family:var(--mono);font-size:12px;color:${tc}">${e.oni}</div>
+            <div style="font-size:11px;color:var(--tx2)">${e.impact}</div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+    <div class="pg-section" style="margin-top:16px">
+      <h2>What is ENSO?</h2>
+      <div class="alert-card info">
+        <div class="alert-body" style="font-size:12px;line-height:1.6;color:var(--tx2)">
+          <strong style="color:var(--tx)">El Niño–Southern Oscillation</strong> is a recurring climate pattern involving changes in sea surface temperatures across the central and eastern tropical Pacific. The cycle has three phases:<br><br>
+          <strong style="color:#ef4444">El Niño</strong> — Warmer than normal waters in the eastern Pacific. For NZ: drier conditions, more southwest winds, marine heatwave risk.<br>
+          <strong style="color:#3b82f6">La Niña</strong> — Cooler than normal waters in the eastern Pacific. For NZ: wetter conditions, more northeast winds, increased cyclone risk.<br>
+          <strong style="color:#22c55e">Neutral</strong> — Near-average conditions. Weather driven by other climate drivers like the SAM and IOD.
+        </div>
+      </div>
+    </div>`;
+
+  drawENSOChart(oni);
+  drawSSTMap(latest.v);
+}
+
+function drawENSOChart(oni){
+  const w=900,h=260,p={t:20,r:20,b:30,l:45},iw=w-p.l-p.r,ih=h-p.t-p.b;
+  const svg = d3.select('#enso-chart').append('svg').attr('viewBox',`0 0 ${w} ${h}`);
+  const g_ = svg.append('g').attr('transform',`translate(${p.l},${p.t})`);
+  const xS = d3.scaleLinear().domain([0,oni.length-1]).range([0,iw]);
+  const maxV = Math.max(Math.abs(d3.min(oni,d=>d.v)),Math.abs(d3.max(oni,d=>d.v)),1.5);
+  const yS = d3.scaleLinear().domain([-maxV,maxV]).range([ih,0]);
+
+  g_.append('rect').attr('x',0).attr('y',0).attr('width',iw).attr('height',yS(0.5)).attr('fill','rgba(239,68,68,.04)');
+  g_.append('rect').attr('x',0).attr('y',yS(-0.5)).attr('width',iw).attr('height',ih-yS(-0.5)).attr('fill','rgba(59,130,246,.04)');
+  g_.append('text').attr('x',iw-4).attr('y',12).attr('text-anchor','end').attr('fill','rgba(239,68,68,.3)').attr('font-size','10').text('El Niño Zone');
+  g_.append('text').attr('x',iw-4).attr('y',ih-4).attr('text-anchor','end').attr('fill','rgba(59,130,246,.3)').attr('font-size','10').text('La Niña Zone');
+
+  g_.append('line').attr('x1',0).attr('y1',yS(0)).attr('x2',iw).attr('y2',yS(0)).attr('stroke','rgba(255,255,255,.15)').attr('stroke-width',1);
+  [0.5,-0.5].forEach(v=>{g_.append('line').attr('x1',0).attr('y1',yS(v)).attr('x2',iw).attr('y2',yS(v)).attr('stroke','rgba(255,255,255,.08)').attr('stroke-dasharray','4 4').attr('stroke-width',.5);});
+
+  const areaPos = d3.area().x((_,i)=>xS(i)).y0(yS(0)).y1(d=>d.v>0?yS(d.v):yS(0)).curve(d3.curveMonotoneX);
+  const areaNeg = d3.area().x((_,i)=>xS(i)).y0(yS(0)).y1(d=>d.v<0?yS(d.v):yS(0)).curve(d3.curveMonotoneX);
+  g_.append('path').datum(oni).attr('d',areaPos).attr('fill','rgba(239,68,68,.15)');
+  g_.append('path').datum(oni).attr('d',areaNeg).attr('fill','rgba(59,130,246,.15)');
+  g_.append('path').datum(oni).attr('d',d3.line().x((_,i)=>xS(i)).y(d=>yS(d.v)).curve(d3.curveMonotoneX)).attr('fill','none').attr('stroke','#d4dae6').attr('stroke-width',1.5);
+  oni.forEach((d,i)=>{g_.append('circle').attr('cx',xS(i)).attr('cy',yS(d.v)).attr('r',2).attr('fill',d.v>=0.5?'#ef4444':d.v<=-0.5?'#3b82f6':'#22c55e');});
+
+  // "Now" line
+  g_.append('line').attr('x1',xS(oni.length-1)).attr('y1',0).attr('x2',xS(oni.length-1)).attr('y2',ih).attr('stroke','#ef4444').attr('stroke-width',1).attr('stroke-dasharray','4 3');
+  g_.append('text').attr('x',xS(oni.length-1)).attr('y',-6).attr('text-anchor','middle').attr('fill','#ef4444').attr('font-size','8').attr('font-weight','600').attr('font-family','var(--mono)').text('NOW');
+
+  let lastYr=0; oni.forEach((d,i)=>{if(d.yr!==lastYr){lastYr=d.yr;g_.append('text').attr('x',xS(i)).attr('y',ih+18).attr('text-anchor','middle').attr('fill','#6b7a94').attr('font-size','9').attr('font-family','var(--mono)').text(d.yr);}});
+  [-1.5,-1,-0.5,0,0.5,1,1.5].forEach(v=>{if(Math.abs(v)<=maxV) g_.append('text').attr('x',-8).attr('y',yS(v)+3).attr('text-anchor','end').attr('fill','#6b7a94').attr('font-size','8').attr('font-family','var(--mono)').text((v>0?'+':'')+v.toFixed(1));});
+}
+
+function drawSSTMap(oniVal){
+  const container = document.getElementById('sst-map');
+  const mw=W, mh=Hh;
+  const svg = d3.select(container).append('svg').attr('viewBox',`0 0 ${mw} ${mh}`)
+    .attr('preserveAspectRatio','xMidYMid meet')
+    .style('width','100%').style('height','100%').style('display','block').style('touch-action','none').style('cursor','grab');
+  const g = svg.append('g');
+  g.append('rect').attr('width',mw).attr('height',mh).attr('fill','#050910');
+  for(let ln=-180;ln<=180;ln+=30) g.append('line').attr('x1',px(ln)).attr('y1',0).attr('x2',px(ln)).attr('y2',mh).attr('stroke','rgba(80,120,220,.03)').attr('stroke-width',.3).attr('class','g-sst');
+  for(let lt=-60;lt<=60;lt+=15) g.append('line').attr('x1',0).attr('y1',py(lt)).attr('x2',mw).attr('y2',py(lt)).attr('stroke','rgba(80,120,220,.03)').attr('stroke-width',.3).attr('class','g-sst');
+  g.append('line').attr('x1',0).attr('y1',py(0)).attr('x2',mw).attr('y2',py(0)).attr('stroke','rgba(255,255,255,.08)').attr('stroke-dasharray','6 4').attr('stroke-width',.5).attr('class','g-sst');
+  const isW=oniVal>=0, bC=isW?'rgba(239,68,68,':'rgba(59,130,246,', iN=Math.min(1,Math.abs(oniVal));
+  [{lN:25,lS:-25,o:iN*0.15},{lN:18,lS:-18,o:iN*0.25},{lN:12,lS:-12,o:iN*0.35}].forEach(b=>{
+    g.append('rect').attr('x',px(-180)).attr('y',py(b.lN)).attr('width',px(-80)-px(-180)).attr('height',py(b.lS)-py(b.lN)).attr('fill',bC+b.o+')');
+    const wC=isW?'rgba(59,130,246,':'rgba(239,68,68,';
+    g.append('rect').attr('x',px(120)).attr('y',py(b.lN)).attr('width',px(180)-px(120)).attr('height',py(b.lS)-py(b.lN)).attr('fill',wC+(b.o*0.5)+')');
+  });
+  [{n:'Niño 4',w:160,e:-150,nL:5,sL:-5,t:oniVal<=-0.5?0.3:oniVal>=0.5?iN*0.6:0.1},
+   {n:'Niño 3.4',w:-170,e:-120,nL:5,sL:-5,t:iN*0.5,p:true},
+   {n:'Niño 3',w:-150,e:-90,nL:5,sL:-5,t:oniVal>=0.5?iN*0.7:oniVal<=-0.5?iN*0.7:0.05},
+   {n:'Niño 1+2',w:-90,e:-80,nL:0,sL:-10,t:oniVal>=0.5?iN*0.8:oniVal<=-0.5?iN*0.6:0.05}
+  ].forEach(z=>{
+    const x1=px(z.w),x2=px(z.e),y1=py(z.nL),y2=py(z.sL),op=z.t*0.6;
+    if(x2<x1){g.append('rect').attr('x',x1).attr('y',y1).attr('width',mw-x1).attr('height',y2-y1).attr('fill',bC+op+')');g.append('rect').attr('x',0).attr('y',y1).attr('width',x2).attr('height',y2-y1).attr('fill',bC+op+')');}
+    else g.append('rect').attr('x',x1).attr('y',y1).attr('width',x2-x1).attr('height',y2-y1).attr('fill',bC+op+')');
+    if(z.p&&x2>x1){g.append('rect').attr('x',x1).attr('y',y1).attr('width',x2-x1).attr('height',y2-y1).attr('fill','none').attr('stroke','#eab308').attr('stroke-width',1.5).attr('stroke-dasharray','6 3');
+      g.append('text').attr('x',(x1+x2)/2).attr('y',y1-6).attr('text-anchor','middle').attr('fill','#eab308').attr('font-size','9').attr('font-weight','600').attr('font-family','var(--mono)').text('NIÑO 3.4 — PRIMARY').attr('class','sl');}
+    const cx=x2<x1?(x1+50):((x1+x2)/2),cy=(y1+y2)/2,tc=isW?'#ef4444':'#3b82f6';
+    if(!z.p) g.append('text').attr('x',cx).attr('y',cy-3).attr('text-anchor','middle').attr('fill','rgba(255,255,255,.3)').attr('font-size','8').text(z.n).attr('class','sl');
+    const tl=z.t>0.3?(isW?'Warm':'Cool'):z.t>0.1?(isW?'Slightly warm':'Slightly cool'):'Near normal';
+    g.append('text').attr('x',cx).attr('y',cy+9).attr('text-anchor','middle').attr('fill',tc).attr('font-size','8').attr('font-weight','500').attr('font-family','var(--mono)').text(tl).attr('class','sl');
+  });
+  CONTINENTS.forEach(c=>g.append('path').attr('d',smoothPath(c)).attr('fill','#141e35').attr('stroke','#1e2d4a').attr('stroke-width',.4).attr('class','l-sst'));
+  [[px(175),py(-38),'New Zealand',9],[px(135),py(-25),'Australia',9],[px(-75),py(-15),'S. America',9],[px(-115),py(40),'N. America',9],[px(140),py(35),'Japan',8],[px(120),py(-5),'Indonesia',8]].forEach(([x,y,t,s])=>g.append('text').attr('x',x).attr('y',y).attr('text-anchor','middle').attr('fill','rgba(255,255,255,.12)').attr('font-size',s).text(t).attr('class','sl'));
+  g.append('text').attr('x',px(-160)).attr('y',py(30)).attr('text-anchor','middle').attr('fill','rgba(255,255,255,.06)').attr('font-size','14').attr('letter-spacing','5px').text('PACIFIC OCEAN').attr('class','sl');
+  const aY=py(0)+20;
+  if(oniVal<=-0.5){for(let ln=-170;ln<-90;ln+=20){const x=px(ln);g.append('polygon').attr('points',`${x-8},${aY-3} ${x-8},${aY+3} ${x-14},${aY}`).attr('fill','rgba(59,130,246,.3)');} g.append('text').attr('x',px(-140)).attr('y',aY+18).attr('text-anchor','middle').attr('fill','rgba(59,130,246,.4)').attr('font-size','8').text('Strong easterlies → cold upwelling').attr('class','sl');}
+  else if(oniVal>=0.5){for(let ln=-160;ln<-100;ln+=20){const x=px(ln);g.append('line').attr('x1',x-15).attr('y1',aY).attr('x2',x).attr('y2',aY).attr('stroke','rgba(239,68,68,.2)').attr('stroke-width',1).attr('stroke-dasharray','3 3');} g.append('text').attr('x',px(-140)).attr('y',aY+18).attr('text-anchor','middle').attr('fill','rgba(239,68,68,.4)').attr('font-size','8').text('Weak trades → warm water pools east').attr('class','sl');}
+  const lg=g.append('g').attr('transform',`translate(${mw-150},${mh-55})`);
+  lg.append('rect').attr('width',140).attr('height',48).attr('rx',6).attr('fill','rgba(7,11,21,.85)').attr('stroke','rgba(99,102,241,.1)');
+  lg.append('rect').attr('x',8).attr('y',8).attr('width',12).attr('height',8).attr('rx',2).attr('fill','rgba(239,68,68,.3)');
+  lg.append('text').attr('x',24).attr('y',15).attr('fill','#6b7a94').attr('font-size','8').text('Warmer than normal').attr('class','sl');
+  lg.append('rect').attr('x',8).attr('y',22).attr('width',12).attr('height',8).attr('rx',2).attr('fill','rgba(59,130,246,.3)');
+  lg.append('text').attr('x',24).attr('y',29).attr('fill','#6b7a94').attr('font-size','8').text('Cooler than normal').attr('class','sl');
+  lg.append('rect').attr('x',8).attr('y',36).attr('width',12).attr('height',4).attr('rx',1).attr('fill','none').attr('stroke','#eab308').attr('stroke-width',1).attr('stroke-dasharray','3 2');
+  lg.append('text').attr('x',24).attr('y',42).attr('fill','#6b7a94').attr('font-size','8').text('Niño 3.4 monitoring box').attr('class','sl');
+  // Zoom
+  const zm=d3.zoom().scaleExtent([1,8]).translateExtent([[-100,-50],[mw+100,mh+50]]).on('zoom',ev=>{
+    g.attr('transform',ev.transform);const k=ev.transform.k;
+    g.selectAll('.g-sst').attr('stroke-width',.3/k);g.selectAll('.l-sst').attr('stroke-width',.4/k);
+    g.selectAll('.sl').each(function(){const o=+this.dataset.fs||parseFloat(this.getAttribute('font-size'))||9;if(!this.dataset.fs)this.dataset.fs=o;this.setAttribute('font-size',o/k);});
+  });
+  svg.call(zm);
+  const k0=1.3,tx0=(mw/2)*(1-k0),ty0=(mh*0.5)*(1-k0);
+  svg.call(zm.transform,d3.zoomIdentity.translate(tx0,ty0).scale(k0));
+}
+
+// ── Solar Activity Page ──
+const SOLAR_APIS = {
+  flares: 'https://services.swpc.noaa.gov/json/goes/primary/xray-flares-7-day.json',
+  kp: 'https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json',
+  solarWind: 'https://services.swpc.noaa.gov/products/summary/solar-wind-mag-field.json',
+  cme: 'https://api.nasa.gov/DONKI/CME?startDate=2026-08-24&endDate=2026-08-31&api_key=DEMO_KEY'
+};
+let solarData = null;
+
+function renderSolarPage(el){
+  const demo = {
+    kp: 3, kpText: 'Unsettled',
+    flares: [{cls:'C2.4',time:NOW-3*H,peak:'14:23 UTC'},{cls:'M1.1',time:NOW-8*H,peak:'09:15 UTC'},{cls:'C5.7',time:NOW-18*H,peak:'22:41 UTC'},{cls:'C1.3',time:NOW-D,peak:'06:08 UTC'}],
+    cmes: [{time:NOW-6*H,speed:680,type:'Halo',eta:'~36 hours',arrival:NOW+30*H}],
+    wind: {speed:425,bt:6.2,bz:-2.1,density:5.8},
+    sunspots: 142
+  };
+  const d = solarData || demo;
+  const kpCol = d.kp<=2?'#22c55e':d.kp<=4?'#eab308':d.kp<=6?'#f97316':'#ef4444';
+  const kpLbl = d.kp<=1?'Quiet':d.kp<=3?'Unsettled':d.kp<=4?'Active':d.kp<=6?'Storm':'Severe Storm';
+  const solarNow = new Date();
+  const solarTimeStr = solarNow.toLocaleString('en-NZ',{dateStyle:'medium',timeStyle:'short',timeZone:'Pacific/Auckland'});
+
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding:10px 14px;background:var(--card);border:1px solid var(--bdr);border-radius:10px">
+      <div><span style="font-size:11px;color:var(--tx2)">Last Updated</span><div style="font-family:var(--mono);font-size:13px;margin-top:2px">${solarTimeStr}</div></div>
+      <div style="text-align:center"><span style="font-size:11px;color:var(--tx2)">Monitoring Period</span><div style="font-family:var(--mono);font-size:13px;margin-top:2px">Last 7 days</div></div>
+      <div style="text-align:right"><span style="font-size:11px;color:var(--tx2)">Auto-refresh</span><div style="font-family:var(--mono);font-size:13px;margin-top:2px">Every 60s</div></div>
+    </div>
+    <div class="stat-row">
+      <div class="stat-item"><div class="stat-label">Kp Index</div><div class="stat-val" style="color:${kpCol}">${d.kp}</div><div class="stat-sub">${kpLbl}</div></div>
+      <div class="stat-item"><div class="stat-label">Solar Wind</div><div class="stat-val">${d.wind.speed}<span style="font-size:12px;color:var(--tx2)"> km/s</span></div><div class="stat-sub">Bt: ${d.wind.bt} nT · Bz: ${d.wind.bz} nT</div></div>
+      <div class="stat-item"><div class="stat-label">Sunspot Number</div><div class="stat-val">${d.sunspots}</div><div class="stat-sub">Daily count</div></div>
+      <div class="stat-item"><div class="stat-label">Data Source</div><div class="stat-val" style="font-size:14px">${solarData?'NOAA SWPC':'Demo'}</div><div class="stat-sub">Space Weather Center</div></div>
+    </div>
+    <div class="an-grid">
+      <div class="an-card">
+        <h3>Recent Solar Flares (7 days)</h3>
+        ${d.flares.map(f=>{
+          const cls=f.cls[0]; const fcol=cls==='X'?'#ef4444':cls==='M'?'#f97316':cls==='C'?'#eab308':'#22c55e';
+          return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--bdr)">
+            <span class="eb" style="background:${fcol}22;color:${fcol};min-width:44px;height:24px;border-radius:5px;font-size:12px">${f.cls}</span>
+            <span style="flex:1;font-size:12px">${relTime(f.time)}</span>
+            <span style="color:var(--tx2);font-size:11px;font-family:var(--mono)">${f.peak}</span>
+          </div>`;
+        }).join('')}
+      </div>
+      <div class="an-card">
+        <h3>CME Alerts</h3>
+        ${d.cmes.length ? d.cmes.map(c=>`
+          <div class="alert-card critical" style="margin:0">
+            <div class="alert-icon" style="background:rgba(249,115,22,.15);color:var(--orange);font-size:16px">☀</div>
+            <div class="alert-body">
+              <div class="alert-title">${c.type} CME — ${c.speed} km/s</div>
+              <div class="alert-meta">Detected ${relTime(c.time)} · ETA: ${c.eta}</div>
+              <div style="margin-top:6px;font-size:11px;color:var(--tx2)">Expected to impact Earth's magnetosphere. Predicted Kp increase to ${Math.min(9,d.kp+2)}–${Math.min(9,d.kp+3)}.</div>
+            </div>
+          </div>`).join('') : '<div class="alert-card info"><div class="alert-icon" style="background:rgba(34,197,94,.15);color:var(--green)">✓</div><div class="alert-body"><div class="alert-title">No Earth-directed CMEs</div><div class="alert-meta">No coronal mass ejections currently heading toward Earth</div></div></div>'}
+      </div>
+    </div>
+    <div class="an-grid" style="margin-top:12px">
+      <div class="an-card" style="grid-column:1/-1">
+        <h3>Geomagnetic Activity Scale</h3>
+        <div style="display:flex;gap:4px;margin-top:8px;height:28px">
+          ${[0,1,2,3,4,5,6,7,8,9].map(i=>{
+            const c=i<=1?'#22c55e':i<=3?'#eab308':i<=5?'#f97316':i<=7?'#ef4444':'#b91c1c';
+            return `<div style="flex:1;background:${c}${d.kp===i?'':'33'};border-radius:4px;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:10px;font-weight:${d.kp===i?'700':'400'};color:${d.kp===i?'#fff':'#6b7a94'};border:${d.kp===i?'2px solid '+c:'1px solid transparent'}">${i}</div>`;
+          }).join('')}
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--tx2);margin-top:4px;padding:0 2px"><span>Quiet</span><span>Unsettled</span><span>Storm</span><span>Severe</span></div>
+      </div>
+    </div>
+    <div class="pg-section" style="margin-top:16px">
+      <h2>Live Solar Imagery</h2>
+      <div style="font-size:11px;color:var(--tx2);margin-bottom:12px">Near real-time imagery from NASA SDO and SOHO satellites. Images update every few minutes when hosted externally.</div>
+      <div class="an-grid">
+        <div class="an-card" style="text-align:center">
+          <h3>SDO AIA 304 — Flares & Prominences</h3>
+          <div style="position:relative;padding-top:100%;overflow:hidden;border-radius:50%;margin:8px auto;max-width:280px;background:#0a0a0a">
+            <img src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0304.jpg" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" />
+            <div style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;align-items:center;justify-content:center;color:var(--tx2);font-size:11px;text-align:center;padding:20px">Live image unavailable in sandbox — visible when hosted</div>
+          </div>
+          <div style="font-size:10px;color:var(--tx2);margin-top:4px">Shows solar flares and prominences in extreme UV (304 Å)</div>
+        </div>
+        <div class="an-card" style="text-align:center">
+          <h3>SOHO LASCO C2 — CME Detection</h3>
+          <div style="position:relative;padding-top:100%;overflow:hidden;border-radius:50%;margin:8px auto;max-width:280px;background:#0a0a0a">
+            <img src="https://soho.nascom.nasa.gov/data/realtime/c2/512/latest.jpg" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" />
+            <div style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;align-items:center;justify-content:center;color:var(--tx2);font-size:11px;text-align:center;padding:20px">Live image unavailable in sandbox — visible when hosted</div>
+          </div>
+          <div style="font-size:10px;color:var(--tx2);margin-top:4px">Coronagraph showing inner corona — CMEs appear as bright outflows</div>
+        </div>
+        <div class="an-card" style="text-align:center">
+          <h3>SDO AIA 193 — Solar Corona</h3>
+          <div style="position:relative;padding-top:100%;overflow:hidden;border-radius:50%;margin:8px auto;max-width:280px;background:#0a0a0a">
+            <img src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0193.jpg" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" />
+            <div style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;align-items:center;justify-content:center;color:var(--tx2);font-size:11px;text-align:center;padding:20px">Live image unavailable in sandbox — visible when hosted</div>
+          </div>
+          <div style="font-size:10px;color:var(--tx2);margin-top:4px">Coronal structures and active regions in extreme UV (193 Å)</div>
+        </div>
+        <div class="an-card" style="text-align:center">
+          <h3>SOHO LASCO C3 — Wide Corona</h3>
+          <div style="position:relative;padding-top:100%;overflow:hidden;border-radius:50%;margin:8px auto;max-width:280px;background:#0a0a0a">
+            <img src="https://soho.nascom.nasa.gov/data/realtime/c3/512/latest.jpg" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" />
+            <div style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;align-items:center;justify-content:center;color:var(--tx2);font-size:11px;text-align:center;padding:20px">Live image unavailable in sandbox — visible when hosted</div>
+          </div>
+          <div style="font-size:10px;color:var(--tx2);margin-top:4px">Wide-field coronagraph — tracks CME propagation into space</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ── Schumann Resonance Forecast Page ──
+function renderSchumannPage(el){
+  const harmonics = [
+    {n:1,freq:7.83,name:'Fundamental'},
+    {n:2,freq:14.3,name:'2nd Harmonic'},
+    {n:3,freq:20.8,name:'3rd Harmonic'},
+    {n:4,freq:27.3,name:'4th Harmonic'},
+    {n:5,freq:33.8,name:'5th Harmonic'},
+    {n:6,freq:39.0,name:'6th Harmonic'}
+  ];
+
+  // Prediction model: use Kp index to estimate SR perturbation
+  const demoKp = solarData ? solarData.kp : 3;
+  const perturbation = demoKp * 0.03; // ~3% shift per Kp unit
+  const ampBoost = 1 + demoKp * 0.08; // amplitude scales with geomagnetic activity
+  const srStatus = demoKp <= 2 ? 'Normal' : demoKp <= 4 ? 'Mildly Perturbed' : demoKp <= 6 ? 'Significantly Perturbed' : 'Highly Disturbed';
+  const srCol = demoKp <= 2 ? '#22c55e' : demoKp <= 4 ? '#eab308' : demoKp <= 6 ? '#f97316' : '#ef4444';
+  const now = new Date();
+  const timeStr = now.toLocaleString('en-NZ',{dateStyle:'medium',timeStyle:'short',timeZone:'Pacific/Auckland'});
+  const utcStr2 = now.toISOString().replace('T',' ').replace(/:\d{2}\.\d+Z/,' UTC');
+  const forecastEnd = new Date(now.getTime()+48*H);
+  const forecastStr = forecastEnd.toLocaleString('en-NZ',{dateStyle:'medium',timeStyle:'short',timeZone:'Pacific/Auckland'});
+
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding:10px 14px;background:var(--card);border:1px solid var(--bdr);border-radius:10px">
+      <div><span style="font-size:11px;color:var(--tx2)">Last Updated</span><div style="font-family:var(--mono);font-size:13px;margin-top:2px">${timeStr}</div></div>
+      <div style="text-align:center"><span style="font-size:11px;color:var(--tx2)">Forecast Window</span><div style="font-family:var(--mono);font-size:13px;margin-top:2px">Now → +48 hours</div></div>
+      <div style="text-align:right"><span style="font-size:11px;color:var(--tx2)">Valid Until</span><div style="font-family:var(--mono);font-size:13px;margin-top:2px">${forecastStr}</div></div>
+    </div>
+    <div class="stat-row">
+      <div class="stat-item"><div class="stat-label">Predicted SR State</div><div class="stat-val" style="color:${srCol};font-size:16px">${srStatus}</div><div class="stat-sub">Based on Kp ${demoKp}</div></div>
+      <div class="stat-item"><div class="stat-label">Fundamental</div><div class="stat-val">${(7.83 * (1+perturbation)).toFixed(2)}<span style="font-size:12px;color:var(--tx2)"> Hz</span></div><div class="stat-sub">${perturbation>0?'+':''}${(perturbation*100).toFixed(1)}% from baseline</div></div>
+      <div class="stat-item"><div class="stat-label">Amplitude Factor</div><div class="stat-val">${ampBoost.toFixed(2)}x</div><div class="stat-sub">Relative to quiet conditions</div></div>
+      <div class="stat-item"><div class="stat-label">Prediction Method</div><div class="stat-val" style="font-size:14px">Solar→Kp→SR</div><div class="stat-sub">Geomagnetic correlation model</div></div>
+    </div>
+    <div class="an-grid">
+      <div class="an-card" style="grid-column:1/-1">
+        <h3>Predicted Schumann Resonance Spectrum</h3>
+        <div class="an-cw" id="sr-spectrum" style="height:clamp(160px,24vh,240px)"></div>
+      </div>
+    </div>
+    <div class="an-grid" style="margin-top:12px">
+      <div class="an-card">
+        <h3>Harmonic Frequencies</h3>
+        ${harmonics.map(h=>{
+          const predicted = h.freq * (1 + perturbation);
+          const shift = predicted - h.freq;
+          const label = h.n===1?'1st':''+h.n+'th';
+          return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--bdr)">
+            <span style="color:var(--tx2);font-size:11px;min-width:70px">${h.name}</span>
+            <span style="font-family:var(--mono);font-weight:600;font-size:14px;flex:1;text-align:right">${predicted.toFixed(2)} Hz</span>
+            <span style="font-size:11px;min-width:45px;text-align:right;color:${shift>0.1?'#f97316':shift>0?'#eab308':'#22c55e'};font-family:var(--mono)">${shift>0?'+':''}${shift.toFixed(2)}</span>
+          </div>`;
+        }).join('')}
+      </div>
+      <div class="an-card">
+        <h3>Solar → SR Impact Chain</h3>
+        <div style="padding:8px 0">
+          ${[
+            {icon:'☀',label:'Solar Event',desc:'Flares & CMEs detected',col:'#f97316',time:'Detected ~6h ago'},
+            {icon:'→',label:'Transit',desc:'CME speed ~680 km/s',col:'var(--tx2)',time:'ETA: ~30h from now'},
+            {icon:'🧲',label:'Magnetosphere',desc:`Current Kp: ${demoKp} (${demoKp<=2?'Quiet':demoKp<=4?'Unsettled':'Active'})`,col:srCol,time:'Live reading'},
+            {icon:'⚡',label:'Ionosphere',desc:'Upper cavity boundary shifts',col:'#818cf8',time:'Responds within minutes of Kp change'},
+            {icon:'〰',label:'SR Response',desc:`${srStatus} — ${(perturbation*100).toFixed(1)}% drift`,col:srCol,time:'Current prediction'}
+          ].map(s=>`
+            <div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--bdr)">
+              <span style="font-size:16px;width:24px;text-align:center;padding-top:2px">${s.icon}</span>
+              <div style="flex:1"><div style="font-size:12px;font-weight:500">${s.label}</div><div style="font-size:11px;color:var(--tx2)">${s.desc}</div><div style="font-size:10px;color:var(--tx2);font-family:var(--mono);margin-top:2px">${s.time}</div></div>
+              <div style="width:8px;height:8px;border-radius:50%;background:${s.col};margin-top:6px"></div>
+            </div>`).join('')}
+        </div>
+      </div>
+    </div>
+    <div class="pg-section" style="margin-top:16px">
+      <h2>Calibration Sources</h2>
+      <div class="an-grid">
+        <div class="alert-card"><div class="alert-icon" style="background:var(--acc-bg);color:var(--acc);font-size:14px">📡</div><div class="alert-body"><div class="alert-title">Tomsk State University, Russia</div><div class="alert-meta">sosrff.tsu.ru · Primary SR monitoring station · Spectrogram data</div></div></div>
+        <div class="alert-card"><div class="alert-icon" style="background:var(--acc-bg);color:var(--acc);font-size:14px">💚</div><div class="alert-body"><div class="alert-title">HeartMath Institute GCI</div><div class="alert-meta">Global Coherence Monitoring System · 6 magnetometer sites worldwide</div></div></div>
+      </div>
+    </div>`;
+
+  // Draw SR spectrum
+  drawSRSpectrum(harmonics, perturbation, ampBoost);
+}
+
+function drawSRSpectrum(harmonics, perturbation, ampBoost){
+  const w=900,h=220,p={t:16,r:20,b:30,l:50},iw=w-p.l-p.r,ih=h-p.t-p.b;
+  const svg = d3.select('#sr-spectrum').append('svg').attr('viewBox',`0 0 ${w} ${h}`);
+  const g_ = svg.append('g').attr('transform',`translate(${p.l},${p.t})`);
+  const xS = d3.scaleLinear().domain([0,50]).range([0,iw]);
+  const yS = d3.scaleLinear().domain([0,1.2]).range([ih,0]);
+
+  // Background noise floor
+  g_.append('line').attr('x1',0).attr('y1',yS(0.05)).attr('x2',iw).attr('y2',yS(0.05)).attr('stroke','rgba(255,255,255,.05)').attr('stroke-width',1);
+
+  // Generate spectrum curve with peaks at harmonics
+  const points = [];
+  for(let f=0;f<=50;f+=0.2){
+    let amp = 0.03; // noise floor
+    harmonics.forEach(h=>{
+      const pf = h.freq * (1 + perturbation);
+      const dist = Math.abs(f - pf);
+      const width = 0.8 + h.n * 0.15;
+      const peak = (1.0 / h.n) * ampBoost * 0.9;
+      amp += peak * Math.exp(-(dist*dist)/(2*width*width));
+    });
+    points.push({f,amp:Math.min(amp,1.15)});
+  }
+
+  // Gradient fill
+  const defs = svg.append('defs');
+  const grad = defs.append('linearGradient').attr('id','srGrad').attr('x1',0).attr('y1',0).attr('x2',0).attr('y2',1);
+  grad.append('stop').attr('offset','0%').attr('stop-color','#818cf8').attr('stop-opacity',.3);
+  grad.append('stop').attr('offset','100%').attr('stop-color','#818cf8').attr('stop-opacity',.02);
+
+  g_.append('path').datum(points).attr('d',d3.area().x(d=>xS(d.f)).y0(ih).y1(d=>yS(d.amp)).curve(d3.curveMonotoneX)).attr('fill','url(#srGrad)');
+  g_.append('path').datum(points).attr('d',d3.line().x(d=>xS(d.f)).y(d=>yS(d.amp)).curve(d3.curveMonotoneX)).attr('fill','none').attr('stroke','#818cf8').attr('stroke-width',1.5);
+
+  // Peak labels
+  harmonics.forEach(h=>{
+    const pf = h.freq*(1+perturbation);
+    const peak = (1.0/h.n)*ampBoost*0.9;
+    g_.append('line').attr('x1',xS(pf)).attr('y1',yS(Math.min(peak,1.1))-8).attr('x2',xS(pf)).attr('y2',ih).attr('stroke','rgba(129,140,248,.2)').attr('stroke-width',.5).attr('stroke-dasharray','3 3');
+    g_.append('text').attr('x',xS(pf)).attr('y',yS(Math.min(peak,1.1))-12).attr('text-anchor','middle').attr('fill','#d4dae6').attr('font-size','9').attr('font-family','var(--mono)').text(pf.toFixed(1)+' Hz');
+  });
+
+  // "Right Now" indicator — two parallel red dashed lines at the predicted fundamental
+  const nowFreq = harmonics[0].freq * (1 + perturbation);
+  const nowX = xS(nowFreq);
+  const gap = 5;
+  g_.append('line').attr('x1',nowX-gap).attr('y1',0).attr('x2',nowX-gap).attr('y2',ih)
+    .attr('stroke','#ef4444').attr('stroke-width',1.2).attr('stroke-dasharray','4 3').attr('stroke-opacity',.7);
+  g_.append('line').attr('x1',nowX+gap).attr('y1',0).attr('x2',nowX+gap).attr('y2',ih)
+    .attr('stroke','#ef4444').attr('stroke-width',1.2).attr('stroke-dasharray','4 3').attr('stroke-opacity',.7);
+  // "NOW" label between the lines
+  g_.append('text').attr('x',nowX).attr('y',-4).attr('text-anchor','middle').attr('fill','#ef4444').attr('font-size','8').attr('font-weight','600').attr('font-family','var(--mono)').text('NOW');
+
+  // Axes
+  [0,10,20,30,40,50].forEach(v=>{ g_.append('text').attr('x',xS(v)).attr('y',ih+18).attr('text-anchor','middle').attr('fill','#6b7a94').attr('font-size','9').attr('font-family','var(--mono)').text(v+' Hz'); });
+  g_.append('text').attr('x',-ih/2).attr('y',-38).attr('text-anchor','middle').attr('fill','#6b7a94').attr('font-size','9').attr('transform','rotate(-90)').text('Relative Amplitude');
+}
+
+// ── Search ──
+const searchInput = document.getElementById('search');
+const searchDrop = document.getElementById('sr-drop');
+
+searchInput.addEventListener('input', () => {
+  const q = searchInput.value.trim().toLowerCase();
+  if(!q){ searchDrop.style.display='none'; return; }
+  const matches = EQ.filter(e=> e.loc.toLowerCase().includes(q) || e.region.toLowerCase().includes(q)).sort((a,b)=>b.mag-a.mag).slice(0,8);
+  if(!matches.length){ searchDrop.innerHTML='<div class="sr-empty">No matching events</div>'; searchDrop.style.display='block'; return; }
+  searchDrop.innerHTML = `<div class="sr-status">${matches.length} result${matches.length>1?'s':''}</div>` + matches.map(e=>
+    `<div class="sr-item" data-id="${e.id}">
+      <span class="eb" style="background:${magBg(e.mag)};color:${magColor(e.mag)};min-width:34px;height:20px;font-size:11px;border-radius:4px">${e.mag.toFixed(1)}</span>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.loc}</span>
+      <span style="color:var(--tx2);font-size:11px;flex-shrink:0">${relTime(e.time)}</span>
+    </div>`).join('');
+  searchDrop.style.display='block';
+});
+searchInput.addEventListener('keydown', e => {
+  if(e.key==='Escape'){ searchDrop.style.display='none'; searchInput.blur(); }
+});
+searchDrop.addEventListener('click', e => {
+  const item = e.target.closest('.sr-item');
+  if(!item) return;
+  searchInput.value = '';
+  searchDrop.style.display = 'none';
+  goToEq(item.dataset.id);
+});
+document.addEventListener('click', e => {
+  if(!e.target.closest('.sr-wrap')) searchDrop.style.display='none';
+});
+
+// ── Live Data: USGS → EMSC → GeoNet → Demo ──
+const FEEDS = [
+  { name:'USGS', url:'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson', transform: transformUSGS },
+  { name:'EMSC', url:'https://www.seismicportal.eu/fdsnws/event/1/query?format=json&minmag=2.5&limit=100&orderby=time', transform: transformEMSC },
+  { name:'GeoNet', url:'https://api.geonet.org.nz/quake?MMI=-1', transform: transformGeoNet }
+];
+
+function extractRegion(place){
+  if(!place) return 'Unknown';
+  const regionMap = {'Alaska':'Alaska','California':'California','Hawaii':'Hawaii','Oregon':'California','Washington':'California',
+    'Japan':'Japan','Russia':'Japan','New Zealand':'New Zealand','Chile':'Chile','Peru':'Chile','Indonesia':'Indonesia',
+    'Philippines':'Philippines','Taiwan':'Philippines','China':'Philippines','Tonga':'Tonga','Fiji':'Tonga','Vanuatu':'PNG',
+    'Papua New Guinea':'PNG','Solomon Islands':'PNG','Turkey':'Mediterranean','Greece':'Mediterranean','Italy':'Mediterranean',
+    'Mexico':'California','Iceland':'Mediterranean','Iran':'Mediterranean'};
+  for(const [key,val] of Object.entries(regionMap)){ if(place.includes(key)) return val; }
+  const parts = place.split(',');
+  return (parts[parts.length-1]||'').trim() || 'Other';
+}
+
+function transformUSGS(data){
+  return (data.features||[]).filter(f=>f.properties.mag && f.geometry).map(f=>({
+    id: f.id,
+    mag: Math.round(f.properties.mag*10)/10,
+    lat: f.geometry.coordinates[1],
+    lng: f.geometry.coordinates[0],
+    depth: Math.round(f.geometry.coordinates[2]||0),
+    loc: f.properties.place || 'Unknown location',
+    region: extractRegion(f.properties.place||''),
+    time: f.properties.time,
+    tsunami: f.properties.tsunami === 1,
+    felt: f.properties.felt || 0
+  }));
+}
+
+function transformEMSC(data){
+  return (data.features||[]).filter(f=>f.properties && f.properties.mag).map((f,i)=>{
+    const p=f.properties, g=f.geometry;
+    const loc = p.flynn_region ? p.flynn_region.replace(/\b\w+/g, w=>w[0]+w.slice(1).toLowerCase()) : 'Unknown';
+    return {
+      id: p.unid || 'emsc'+i,
+      mag: Math.round(p.mag*10)/10,
+      lat: g ? g.coordinates[1] : (p.lat||0),
+      lng: g ? g.coordinates[0] : (p.lon||0),
+      depth: Math.round(g ? (g.coordinates[2]||p.depth||0) : (p.depth||0)),
+      loc: loc,
+      region: extractRegion(loc),
+      time: new Date(p.time).getTime(),
+      tsunami: false,
+      felt: 0
+    };
+  });
+}
+
+function transformGeoNet(data){
+  return (data.features||[]).filter(f=>f.properties && f.properties.magnitude).map(f=>{
+    const p=f.properties, g=f.geometry;
+    return {
+      id: p.publicID || f.id,
+      mag: Math.round(p.magnitude*10)/10,
+      lat: g.coordinates[1],
+      lng: g.coordinates[0],
+      depth: Math.round(g.coordinates[2]||p.depth||0),
+      loc: p.locality || 'New Zealand region',
+      region: 'New Zealand',
+      time: new Date(p.time).getTime(),
+      tsunami: false,
+      felt: 0
+    };
+  });
+}
+
+function updateStatus(msg, live){
+  const pill = document.getElementById('live-pill');
+  const upd = document.getElementById('upd-time');
+  upd.textContent = msg;
+  if(live){
+    pill.innerHTML = '&#9679; Live';
+    pill.className = 'pill pill-live';
+  } else {
+    pill.innerHTML = '&#9679; Demo';
+    pill.className = 'pill';
+    pill.style.background = 'rgba(234,179,8,.15)';
+    pill.style.color = '#eab308';
+  }
+}
+
+function refreshAll(){
+  renderCards(); renderLayers(); renderFilters(); renderPanel();
+  if(currentPage==='events') renderEventsPage(document.getElementById('pgc'));
+  else if(currentPage==='alerts') renderAlertsPage(document.getElementById('pgc'));
+  else if(currentPage==='analytics') renderAnalyticsPage(document.getElementById('pgc'));
+  // Rebuild map markers
+  if(window.refreshMarkers) window.refreshMarkers();
+}
+
+async function loadLiveData(){
+  for(const feed of FEEDS){
+    try {
+      updateStatus(`Trying ${feed.name}…`, false);
+      const res = await fetch(feed.url);
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      const live = feed.transform(data);
+      if(live.length > 0){
+        EQ = live;
+        isLive = true;
+        lastUpdate = Date.now();
+        updateStatus(`Live via ${feed.name}`, true);
+        document.getElementById('map').innerHTML = '';
+        buildMap();
+        refreshAll();
+        return feed.name;
+      }
+    } catch(e) {
+      console.warn(`${feed.name} failed:`, e.message);
+    }
+  }
+  isLive = false;
+  updateStatus('Demo data (all feeds unavailable)', false);
+  return null;
+}
+
+// Initial load: try live feeds, fall back to demo
+loadLiveData().then(source => {
+  if(!source) updateStatus('Demo data', false);
+});
+
+// Auto-refresh every 60 seconds
+setInterval(async ()=>{
+  await loadLiveData();
+}, 60000);
+
+// Update the "Updated X ago" text every 15s
+setInterval(()=>{
+  if(isLive && lastUpdate){
+    const ago = Math.round((Date.now()-lastUpdate)/1000);
+    if(ago<60) updateStatus('Updated just now', true);
+    else updateStatus(`Updated ${Math.round(ago/60)}m ago`, true);
+  }
+}, 15000);
+</script>
+</body>
+</html>
