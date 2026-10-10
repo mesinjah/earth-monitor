@@ -213,7 +213,9 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
 
   async function loadCMEs(){
     try{
-      const url = `https://api.nasa.gov/DONKI/CME?startDate=${fmtDate(new Date(Date.now()-7*864e5))}&endDate=${fmtDate(new Date())}&api_key=${NASA_KEY}`;
+      const _cmeEnd = new Date().toISOString().slice(0,10);
+const _cmeStart = new Date(Date.now() - 7*86400000).toISOString().slice(0,10);
+const url = `https://kauai.ccmc.gsfc.nasa.gov/DONKI/WS/get/CME?startDate=${_cmeStart}&endDate=${_cmeEnd}`;
       const data = await fetch(url).then(r=>r.json());
       const typeName = {S:'Slow',C:'Common',O:'Occasional',R:'Rare',ER:'Extremely Rare'};
       const out = [];
