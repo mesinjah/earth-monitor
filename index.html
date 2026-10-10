@@ -215,7 +215,6 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     try{
       const _cmeEnd = new Date().toISOString().slice(0,10);
 const _cmeStart = new Date(Date.now() - 7*86400000).toISOString().slice(0,10);
-const url = `https://api.allorigins.win/raw?url=${encodeURIComponent('https://kauai.ccmc.gsfc.nasa.gov/DONKI/WS/get/CME?startDate='+_cmeStart+'&endDate='+_cmeEnd)}`;
 const url = `https://api.allorigins.win/raw?url=${encodeURIComponent('https://kauai.ccmc.gsfc.nasa.gov/DONKI/WS/get/CME?startDate='+_cmeStart+'&endDate='+_cmeEnd)}`;      const data = await fetch(url).then(r=>r.json());
       const typeName = {S:'Slow',C:'Common',O:'Occasional',R:'Rare',ER:'Extremely Rare'};
       const out = [];
