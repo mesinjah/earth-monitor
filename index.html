@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Real-time Earthquake Activity Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 <!-- When hosting externally, change above to: https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js -->
@@ -181,6 +181,122 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   .cr{grid-template-columns:1fr}
 }
 </style>
+<style>
+@media (max-width:380px){
+  .cards{grid-template-columns:1fr}
+  .stat-row{grid-template-columns:1fr}
+}
+</style>
+<script>
+/* ===== Live sunspots (NOAA/SILSO) + real CME alerts (NASA DONKI) ===== */
+(function(){
+  /* ↓ Recommended: grab a free key at api.nasa.gov (instant) and paste it between the quotes ↓ */
+  const NASA_KEY = 'Q7K9SiJyFeqdj4fadSxIWlY1C5RyTplyWyP0t8JC';
+  const SSN_URL  = 'https://services.swpc.noaa.gov/json/solar-cycle/observed-solar-cycle-indices.json';
+  const H = 36e5;
+  window._liveCMEs = window._liveCMEs || [];
+  window._ssn = window._ssn || null;
+  const fmtDate = d => d.toISOString().slice(0,10);
+  const relT = t => { const h=Math.floor((Date.now()-t)/H); return h<1?'<1h ago':h<24?h+'h ago':Math.floor(h/24)+'d ago'; };
+  const etaT = t => { if(t<=Date.now()) return 'arrived'; const m=Math.round((t-Date.now())/6e4); return m>=60?`${Math.floor(m/60)}h ${m%60}m`:`${m}m`; };
+
+  async function loadSunspots(){
+    try{
+      const arr = await fetch(SSN_URL).then(r=>r.json());
+      if(Array.isArray(arr) && arr.length){
+        const last = arr[arr.length-1];
+        const n = parseFloat(last.ssn ?? last.smoothed_ssn ?? last.observed_swpc_ssn);
+        if(isFinite(n)) window._ssn = Math.round(n);
+      }
+    }catch(e){ console.warn('SSN fetch failed:', e.message); }
+  }
+
+  async function loadCMEs(){
+    try{
+      const url = `https://api.nasa.gov/DONKI/CME?startDate=${fmtDate(new Date(Date.now()-7*864e5))}&endDate=${fmtDate(new Date())}&api_key=${NASA_KEY}`;
+      const data = await fetch(url).then(r=>r.json());
+      const typeName = {S:'Slow',C:'Common',O:'Occasional',R:'Rare',ER:'Extremely Rare'};
+      const out = [];
+      (Array.isArray(data)?data:[]).forEach(c=>{
+        const an = (c.cmeAnalyses||[]).find(a=>a.isMostAccurate) || (c.cmeAnalyses||[])[0];
+        if(!an) return;
+        const enlil = (an.enlilList||[]).find(e=>e.estimatedShockArrivalTime);
+        if(!enlil) return; /* Earth-directed only */
+        const kp = [enlil.kp_90,enlil.kp_135,enlil.kp_180].filter(k=>k!=null);
+        out.push({
+          type: typeName[an.type] || 'CME',
+          speed: an.speed ? Math.round(an.speed) : null,
+          detected: new Date(c.startTime).getTime(),
+          eta: new Date(enlil.estimatedShockArrivalTime).getTime(),
+          kpPred: kp.length ? Math.round(Math.max(...kp)) : null,
+          source: c.activeRegionNum ? ('AR'+c.activeRegionNum) : 'Unlabeled region'
+        });
+      });
+      window._liveCMEs = out.filter(c=>c.eta>Date.now()-864e5).sort((a,b)=>b.detected-a.detected).slice(0,3);
+    }catch(e){ console.warn('CME fetch failed:', e.message); }
+  }
+
+  /* real banner (replaces the hardcoded demo) */
+  renderCMEBanner = function(){
+    const banner = document.getElementById('cme-banner'); if(!banner) return;
+    const active = (window._liveCMEs||[]).filter(c=>c.eta>Date.now());
+    if(!active.length){ banner.innerHTML=''; return; }
+    banner.innerHTML = active.map(c=>`<div class="cme-bar" onclick="switchPage('solar')">
+      <div class="cme-icon">☀</div>
+      <div class="cme-body">
+        <div class="cme-title">CME — ${c.type}${c.speed?' at '+c.speed+' km/s':''} from ${c.source}</div>
+        <div class="cme-meta">Detected ${relT(c.detected)}${c.kpPred?' · Predicted Kp '+c.kpPred:''} · NASA DONKI · Click for details</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0"><div class="cme-eta">${etaT(c.eta)}</div><div class="cme-eta-label">ETA to Earth</div></div>
+    </div>`).join('');
+  };
+  renderCMEBanner(); /* clear the demo immediately */
+
+  /* patch Solar page: real sunspot tile + real CME alerts list */
+  if(typeof renderSolarPage==='function'){
+    const _solar = renderSolarPage;
+    renderSolarPage = function(el){
+      _solar(el);
+      setTimeout(()=>{
+        if(window._ssn!=null){
+          el.querySelectorAll('.stat-item').forEach(it=>{
+            const lab=it.querySelector('.stat-label');
+            if(lab && /sunspot/i.test(lab.textContent)){
+              const v=it.querySelector('.stat-val'); if(v) v.textContent=window._ssn;
+              const sub=it.querySelector('.stat-sub'); if(sub) sub.textContent='Latest observed (NOAA/SILSO)';
+            }
+          });
+        }
+        const cmes=(window._liveCMEs||[]).filter(c=>c.eta>Date.now()-864e5);
+        if(cmes.length){
+          el.querySelectorAll('.an-card').forEach(card=>{
+            const h=card.querySelector('h3');
+            if(h && /CME Alerts/i.test(h.textContent)){
+              card.innerHTML='<h3>CME Alerts</h3>'+cmes.map(c=>`<div class="alert-card critical" style="margin:0 0 8px">
+                <div class="alert-icon" style="background:rgba(249,115,22,.15);color:var(--orange);font-size:16px">☀</div>
+                <div class="alert-body"><div class="alert-title">${c.type} CME${c.speed?' — '+c.speed+' km/s':''}</div>
+                <div class="alert-meta">Detected ${relT(c.detected)} · ETA ${etaT(c.eta)}${c.source?' · '+c.source:''}</div>
+                ${c.kpPred?`<div style="margin-top:6px;font-size:11px;color:var(--tx2)">Predicted Kp ${c.kpPred}.</div>`:''}</div></div>`).join('');
+            }
+          });
+        }
+      },0);
+    };
+  }
+
+  async function refresh(){
+    await Promise.allSettled([loadSunspots(), loadCMEs()]);
+    if(typeof currentPage==='undefined' || currentPage==='dashboard') renderCMEBanner();
+    const pgc=document.getElementById('pgc');
+    if(pgc && pgc.style.display!=='none'){
+      if(currentPage==='solar') renderSolarPage(pgc);
+      else if(currentPage==='signals' && window._sigTab==='solar') renderSolarPage(document.getElementById('sig-body')||pgc);
+    }
+  }
+  refresh();
+  setInterval(refresh, 30*60*1000); /* every 30 min — gentle on the NASA key */
+})();
+</script>
 </head>
 <body>
 <div class="dash">
@@ -2012,5 +2128,271 @@ setInterval(()=>{
   }
 }, 15000);
 </script>
+<script>
+/* ===== Earth Monitor upgrades ===== */
+
+/* 1 — Earthquakes from USGS + EMSC + GeoNet, merged & de-duplicated */
+async function loadLiveData(){
+  updateStatus('Fetching USGS · EMSC · GeoNet…', false);
+  const results = await Promise.allSettled(
+    FEEDS.map(async feed => {
+      const res = await fetch(feed.url);
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      return { name: feed.name, events: feed.transform(await res.json()) };
+    })
+  );
+  const sources = []; let merged = [];
+  results.forEach((r, i) => {
+    if(r.status === 'fulfilled' && r.value.events.length){
+      sources.push(FEEDS[i].name);
+      merged = merged.concat(r.value.events.map(e => ({ ...e, _src: FEEDS[i].name })));
+    } else { console.warn(FEEDS[i].name + ' failed/empty:', (r.reason && r.reason.message) || ''); }
+  });
+  if(merged.length){
+    const prio = { USGS:3, EMSC:2, GeoNet:1 };
+    const near = (a,b) => Math.abs(a.time-b.time)<90000 && Math.abs(a.lat-b.lat)<0.5 && Math.abs(a.lng-b.lng)<0.5;
+    merged.sort((a,b)=> (prio[b._src]||0)-(prio[a._src]||0) || b.time-a.time);
+    const deduped = []; merged.forEach(e=>{ if(!deduped.some(k=>near(k,e))) deduped.push(e); });
+    deduped.sort((a,b)=> b.time-a.time);
+    EQ = deduped; isLive = true; lastUpdate = Date.now();
+    updateStatus('Live via ' + sources.join(' + '), true);
+    document.getElementById('map').innerHTML = ''; buildMap(); refreshAll();
+    return sources.join('+');
+  }
+  isLive = false; updateStatus('Demo data (all feeds unavailable)', false); return null;
+}
+
+/* 2 — Live NOAA space-weather data (flips "Demo" to "NOAA SWPC", feeds real Kp into Risk) */
+const SWPC_WIND_SPEED = 'https://services.swpc.noaa.gov/products/summary/solar-wind-speed.json';
+async function loadSolarData(){
+  const [kpR, flareR, magR, spdR] = await Promise.allSettled([
+    fetch(SOLAR_APIS.kp).then(r=>r.json()),
+    fetch(SOLAR_APIS.flares).then(r=>r.json()),
+    fetch(SOLAR_APIS.solarWind).then(r=>r.json()),
+    fetch(SWPC_WIND_SPEED).then(r=>r.json())
+  ]);
+  const d = { kp:3, flares:[], cmes:[], wind:{speed:'—',bt:'—',bz:'—'}, sunspots:'—' };
+  if(kpR.status==='fulfilled' && Array.isArray(kpR.value) && kpR.value.length>1){
+    const last = kpR.value[kpR.value.length-1];
+    if(last && last[1]!=null) d.kp = Math.round(parseFloat(last[1]));
+  }
+  if(flareR.status==='fulfilled' && Array.isArray(flareR.value)){
+    d.flares = flareR.value.filter(f=>f.max_class)
+      .sort((a,b)=> new Date(b.max_time||b.begin_time) - new Date(a.max_time||a.begin_time))
+      .slice(0,4).map(f=>({ cls:f.max_class, time:new Date(f.max_time||f.begin_time).getTime(), peak:(f.max_time||'').slice(11,16)+' UTC' }));
+  }
+  if(magR.status==='fulfilled' && magR.value){
+    if(magR.value.Bt!=null) d.wind.bt = magR.value.Bt;
+    if(magR.value.Bz!=null) d.wind.bz = magR.value.Bz;
+  }
+  if(spdR.status==='fulfilled' && spdR.value && spdR.value.WindSpeed!=null){
+    d.wind.speed = Math.round(parseFloat(spdR.value.WindSpeed));
+  }
+  solarData = d;
+  const el = document.getElementById('pgc');
+  if(currentPage==='solar') renderSolarPage(el);
+  else if(currentPage==='schumann') renderSchumannPage(el);
+  else if(currentPage==='risk') renderRiskPage(el);
+}
+loadSolarData(); setInterval(loadSolarData, 60000);
+
+/* 3 — "Live" panel (dutchsinse stream) */
+const DUTCH_CHANNEL = 'UCHE92x768p8h-fMrqhsnE1Q';
+function renderLivePage(el){
+  const opened = new Date().toLocaleString('en-NZ',{dateStyle:'medium',timeStyle:'short',timeZone:'Pacific/Auckland'});
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding:10px 14px;background:var(--card);border:1px solid var(--bdr);border-radius:10px">
+      <div><span style="font-size:11px;color:var(--tx2)">Opened</span><div style="font-family:var(--mono);font-size:13px;margin-top:2px">${opened}</div></div>
+      <div style="text-align:center"><span style="font-size:11px;color:var(--tx2)">Source</span><div style="font-family:var(--mono);font-size:13px;margin-top:2px">dutchsinse (YouTube)</div></div>
+      <div style="text-align:right"><span style="font-size:11px;color:var(--tx2)">Type</span><div style="font-family:var(--mono);font-size:13px;margin-top:2px">Independent commentary</div></div>
+    </div>
+    <div style="padding:10px 14px;background:var(--surface);border:1px solid var(--bdr);border-radius:10px;margin-bottom:14px;font-size:11px;color:var(--tx2)">
+      Independent forecaster stream — not an authoritative source. Cross-reference against USGS, GeoNet and NOAA. Exact earthquake prediction is not established science.
+    </div>
+    <div class="an-grid">
+      <div class="an-card" style="grid-column:1/-1;padding:0;overflow:hidden">
+        <div style="position:relative;padding-top:56.25%;background:#0a0a0a">
+          <iframe style="position:absolute;top:0;left:0;width:100%;height:100%;border:0"
+            src="https://www.youtube.com/embed/live_stream?channel=${DUTCH_CHANNEL}&autoplay=1&mute=1"
+            allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:10px;font-size:11px;color:var(--tx2)">
+      Auto-rolls to whatever dutchsinse is streaming now. If it says "unavailable", he's offline — see <a href="https://www.youtube.com/@dutchsinse/streams" target="_blank" style="color:var(--acc)">his channel</a>.
+    </div>`;
+}
+
+/* 4 — wire the Live page + add its sidebar button (no HTML edits needed) */
+(function(){
+  const _rpc = renderPageContent;
+  renderPageContent = function(page){
+    if(page==='live'){ renderLivePage(document.getElementById('pgc')); return; }
+    return _rpc(page);
+  };
+  const sb = document.querySelector('.sb');
+  const sp = sb ? sb.querySelector('.sp') : null;
+  if(sb && !sb.querySelector('[data-page="live"]')){
+    const btn = document.createElement('button');
+    btn.className = 'nb'; btn.dataset.page = 'live'; btn.title = 'Live Stream';
+    btn.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07a10 10 0 0 1 0-14.14"/></svg>';
+    btn.addEventListener('click', ()=>{ switchPage('live'); document.querySelector('.tb h1').textContent='Live — Earthquake Stream'; });
+    sb.insertBefore(btn, sp);
+  }
+})();
+</script>
+<script>
+/* Live solar feeds — NASA SDO (MP4 loops) + SOHO LASCO (animated GIF loops) */
+(function(){
+  const LIVE = [
+    { match:'latest_512_0304', type:'video',
+      src:'https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_0304.mp4',
+      still:'https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0304.jpg' },
+    { match:'c2/512', type:'gif',
+      src:'https://soho.nascom.nasa.gov/data/LATEST/current_c2small.gif',
+      still:'https://soho.nascom.nasa.gov/data/realtime/c2/512/latest.jpg' },
+    { match:'latest_512_0193', type:'video',
+      src:'https://sdo.gsfc.nasa.gov/assets/img/latest/mpeg/latest_1024_0193.mp4',
+      still:'https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0193.jpg' },
+    { match:'c3/512', type:'gif',
+      src:'https://soho.nascom.nasa.gov/data/LATEST/current_c3small.gif',
+      still:'https://soho.nascom.nasa.gov/data/realtime/c3/512/latest.jpg' }
+  ];
+  function upgrade(root){
+    (root || document).querySelectorAll('#pgc img').forEach(img=>{
+      const s = img.getAttribute('src') || '';
+      const cfg = LIVE.find(l => s.includes(l.match));
+      if(!cfg) return;
+      if(cfg.type === 'video'){
+        const v = document.createElement('video');
+        v.src = cfg.src; v.autoplay = true; v.loop = true; v.muted = true;
+        v.setAttribute('playsinline',''); v.setAttribute('muted','');
+        v.style.cssText = img.style.cssText;
+        v.onerror = ()=>{ const f=document.createElement('img'); f.src=cfg.still+'?t='+Date.now(); f.style.cssText=img.style.cssText; v.replaceWith(f); };
+        img.replaceWith(v);
+      } else {
+        img.onerror = function(){ this.onerror=null; this.src=cfg.still+'?t='+Date.now(); };
+        img.src = cfg.src;
+      }
+    });
+  }
+  const _s = renderSolarPage;
+  renderSolarPage = function(el){ _s(el); setTimeout(()=>upgrade(el), 0); };
+  if(typeof currentPage !== 'undefined' && currentPage === 'solar') upgrade(document.getElementById('pgc'));
+})();
+</script>
+<script>
+/* ===== Option A — consolidate sidebar (10 → 4 + Settings) ===== */
+(function(){
+  if(typeof switchPage!=='function' || typeof renderPageContent!=='function') return;
+  const T   = { dashboard:'Overview', events:'Events & Alerts', analytics:'Analytics', signals:'Signals' };
+  const SIG = { risk:'Seismic Risk', solar:'Solar', schumann:'Schumann', enso:'ENSO' };
+  const setH1 = t => { const h=document.querySelector('.tb h1'); if(h) h.textContent=t; };
+
+  const renderSignalsPage = function(el){
+    const render = { risk:renderRiskPage, solar:renderSolarPage, schumann:renderSchumannPage, enso:renderENSOPage };
+    el.innerHTML = `<div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap">${
+      Object.keys(SIG).map(k=>`<button class="fc" data-sig="${k}" style="cursor:pointer;padding:6px 14px">${SIG[k]}</button>`).join('')
+    }</div><div id="sig-body"></div>`;
+    const body = el.querySelector('#sig-body');
+    const show = which => {
+      el.querySelectorAll('[data-sig]').forEach(b=>b.classList.toggle('on', b.dataset.sig===which));
+      window._sigTab = which;
+      (render[which]||render.risk)(body);
+    };
+    el.querySelectorAll('[data-sig]').forEach(b=>b.addEventListener('click',()=>show(b.dataset.sig)));
+    show(SIG[window._sigTab] ? window._sigTab : 'risk');
+  };
+
+  const _sw = switchPage;
+  switchPage = function(page){
+    if(SIG[page]){ window._sigTab = page; _sw('signals'); setH1('Signals'); return; }
+    _sw(page);
+    if(T[page]) setH1(T[page]);
+  };
+
+  const _rpc = renderPageContent;
+  renderPageContent = function(page){
+    if(page==='signals'){ renderSignalsPage(document.getElementById('pgc')); return; }
+    return _rpc(page);
+  };
+
+  function injectEAToggle(el, active){
+    const bar = document.createElement('div');
+    bar.style.cssText = 'display:flex;gap:6px;margin-bottom:14px';
+    bar.innerHTML = `<button class="fc${active==='events'?' on':''}" data-ea="events" style="cursor:pointer;padding:6px 14px">All Events</button>`+
+                    `<button class="fc${active==='alerts'?' on':''}" data-ea="alerts" style="cursor:pointer;padding:6px 14px">Alerts</button>`;
+    bar.querySelector('[data-ea="events"]').addEventListener('click',()=>renderEventsPage(document.getElementById('pgc')));
+    bar.querySelector('[data-ea="alerts"]').addEventListener('click',()=>renderAlertsPage(document.getElementById('pgc')));
+    el.insertBefore(bar, el.firstChild);
+  }
+  if(typeof renderEventsPage==='function'){ const _ev=renderEventsPage; renderEventsPage=function(el){ _ev(el); injectEAToggle(el,'events'); }; }
+  if(typeof renderAlertsPage==='function'){ const _al=renderAlertsPage; renderAlertsPage=function(el){ _al(el); injectEAToggle(el,'alerts'); }; }
+
+  const sb = document.querySelector('.sb');
+  if(sb){
+    ['map','alerts','enso','solar','schumann','risk','live'].forEach(p=>{
+      const b = sb.querySelector(`.nb[data-page="${p}"]`); if(b) b.style.display='none';
+    });
+    const relabel=(p,t)=>{ const b=sb.querySelector(`.nb[data-page="${p}"]`); if(b) b.title=t; };
+    relabel('dashboard','Overview'); relabel('events','Events & Alerts');
+    if(!sb.querySelector('[data-page="signals"]')){
+      const btn=document.createElement('button');
+      btn.className='nb'; btn.dataset.page='signals'; btn.title='Signals';
+      btn.innerHTML='<svg viewBox="0 0 24 24"><path d="M3 12h3l2-7 4 14 3-9 2 2h4"/></svg>';
+      btn.addEventListener('click',()=>switchPage('signals'));
+      sb.insertBefore(btn, sb.querySelector('.sp'));
+    }
+  }
+
+  const tb=document.querySelector('.tb');
+  if(tb && !document.getElementById('mapToggleBtn')){
+    const mb=document.createElement('button');
+    mb.id='mapToggleBtn'; mb.title='Toggle fullscreen map';
+    mb.style.cssText='height:32px;padding:0 12px;background:var(--card);border:1px solid var(--bdr);border-radius:8px;color:var(--tx2);font:12px var(--font);cursor:pointer;white-space:nowrap';
+    mb.textContent='⛶ Map';
+    mb.addEventListener('click',()=>switchPage(currentPage==='map'?'dashboard':'map'));
+    tb.insertBefore(mb, document.getElementById('moon-ind')||tb.lastChild);
+  }
+
+  setH1(T[currentPage]||document.querySelector('.tb h1').textContent);
+})();
+</script>
+<style>
+/* ===== Responsive: tablet + phone ===== */
+@media (max-width:1024px){
+  html,body{overflow:auto;height:auto}
+  .dash{height:auto;min-height:100vh}
+  .sb{position:sticky;top:0;height:100vh;align-self:flex-start}
+  .mn{overflow:visible;min-width:0}
+  .ct{flex-direction:column;overflow:visible;flex:none;min-height:0}
+  .mw{height:50vh;min-height:300px;flex:none}
+  .pn{width:100%;height:380px;border-left:none;border-top:1px solid var(--bdr);flex:none}
+  .pc{-webkit-overflow-scrolling:touch}
+  .cards{grid-template-columns:repeat(2,1fr)}
+  .cr{grid-template-columns:1fr}
+  .an-grid{grid-template-columns:1fr}
+  .pgc{overflow:visible;height:auto}
+  .ev-table{overflow-x:auto;-webkit-overflow-scrolling:touch}
+}
+@media (max-width:640px){
+  .dash{flex-direction:column}
+  .sb{flex-direction:row;width:100%;height:auto;align-self:auto;position:sticky;top:0;z-index:60;
+      border-right:none;border-bottom:1px solid var(--bdr);padding:6px 8px;gap:4px;overflow-x:auto;background:var(--card)}
+  .sb .logo{margin-bottom:0;flex-shrink:0}
+  .sb .nb{flex-shrink:0}
+  .sb .sp{flex:1}
+  .tb{flex-wrap:wrap;height:auto;padding:10px 12px;gap:8px}
+  .tb .sp{display:none}
+  .sr-wrap{flex:1 1 160px;max-width:none}
+  .cards{grid-template-columns:repeat(2,1fr);padding:10px 12px}
+  .stat-row{grid-template-columns:repeat(2,1fr)}
+  .mw{height:46vh;min-height:260px}
+  .pn{height:58vh}
+  .pgc{padding:14px}
+  .ev-head,.ev-row{min-width:460px}
+  .cards,.cr,#cme-banner{padding-left:12px;padding-right:12px}
+}
+</style>
 </body>
 </html>
