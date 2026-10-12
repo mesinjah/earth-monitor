@@ -13,6 +13,7 @@
 <meta name="apple-mobile-web-app-title" content="EarthMonitor">
 <title>Real-time Earthquake Activity Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
@@ -531,7 +532,7 @@ function buildMap(){
   const og=defs.append('radialGradient').attr('id','oGrad').attr('cx','50%').attr('cy','42%').attr('r','68%');
   og.append('stop').attr('offset','0%').attr('stop-color','#0b1525'); og.append('stop').attr('offset','60%').attr('stop-color','#070e1a'); og.append('stop').attr('offset','100%').attr('stop-color','#030710');
   const lg=defs.append('linearGradient').attr('id','lGrad').attr('x1','0').attr('y1','0').attr('x2','0').attr('y2','1');
-  lg.append('stop').attr('offset','0%').attr('stop-color','#1b2d4a'); lg.append('stop').attr('offset','100%').attr('stop-color','#142340');
+  lg.append('stop').attr('offset','0%').attr('stop-color','#274368'); lg.append('stop').attr('offset','100%').attr('stop-color','#162a4b');
   const gf=defs.append('filter').attr('id','mkGlow').attr('x','-100%').attr('y','-100%').attr('width','300%').attr('height','300%');
   gf.append('feGaussianBlur').attr('in','SourceGraphic').attr('stdDeviation','5').attr('result','b');
   const gm=gf.append('feMerge'); gm.append('feMergeNode').attr('in','b'); gm.append('feMergeNode').attr('in','SourceGraphic');
@@ -554,10 +555,24 @@ function buildMap(){
   for(let lt=-60;lt<=80;lt+=30){ const y=py(lt); gratG.append('line').attr('x1',0).attr('y1',y).attr('x2',W).attr('y2',y).attr('stroke','rgba(80,120,220,.04)').attr('stroke-width',.4).attr('class','grat'); }
   gratG.append('line').attr('x1',0).attr('y1',py(0)).attr('x2',W).attr('y2',py(0)).attr('stroke','rgba(99,132,241,.08)').attr('stroke-width',.6).attr('stroke-dasharray','8 4').attr('class','grat');
   [23.44,-23.44].forEach(lt=>gratG.append('line').attr('x1',0).attr('y1',py(lt)).attr('x2',W).attr('y2',py(lt)).attr('stroke','rgba(99,132,241,.03)').attr('stroke-width',.3).attr('stroke-dasharray','3 5').attr('class','grat'));
-  const landG=g.append('g');
-  CONTINENTS.forEach(c=>landG.append('path').attr('d',smoothPath(c)).attr('fill','url(#lGrad)').attr('stroke','#2a4468').attr('stroke-width',.6).attr('filter','url(#lShadow)').attr('class','land'));
-  const shelfG=g.append('g').attr('opacity',.04);
-  CONTINENTS.slice(0,6).forEach(c=>shelfG.append('path').attr('d',smoothPath(c)).attr('fill','none').attr('stroke','#4488cc').attr('stroke-width',4));
+  const landG=g.append('g'), shelfG=g.append('g').attr('opacity',.06);
+  function drawFallbackLand(){
+    CONTINENTS.forEach(c=>landG.append('path').attr('d',smoothPath(c)).attr('fill','url(#lGrad)').attr('stroke','#2a4468').attr('stroke-width',.6).attr('filter','url(#lShadow)').attr('class','land'));
+    CONTINENTS.slice(0,6).forEach(c=>shelfG.append('path').attr('d',smoothPath(c)).attr('fill','none').attr('stroke','#4488cc').attr('stroke-width',4));
+  }
+  (function loadCoastlines(){
+    if(typeof topojson==='undefined' || typeof d3.geoEquirectangular!=='function'){ drawFallbackLand(); return; }
+    const proj=d3.geoEquirectangular().scale(W/(2*Math.PI)).translate([W/2,Hh/2]).rotate([-175,0]);
+    const geoPath=d3.geoPath(proj);
+    fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/land-110m.json')
+      .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(topo=>{
+        const land=topojson.feature(topo,topo.objects.land);
+        shelfG.append('path').datum(land).attr('d',geoPath).attr('fill','none').attr('stroke','#5aa0e6').attr('stroke-width',3.5).attr('stroke-linejoin','round');
+        landG.append('path').datum(land).attr('d',geoPath).attr('fill','url(#lGrad)').attr('stroke','#3f628f').attr('stroke-width',.7).attr('stroke-linejoin','round').attr('filter','url(#lShadow)').attr('class','land');
+      })
+      .catch(e=>{ console.warn('coastline load failed, using fallback art:',e.message); drawFallbackLand(); });
+  })();
   const labStyle={fill:'rgba(70,110,200,.07)',fontFamily:'var(--font)',fontWeight:'600',textAnchor:'middle'};
   [[px(180),py(20),'PACIFIC OCEAN',20,8],[px(-160),py(-25),'SOUTH PACIFIC',12,4],[px(70),py(12),'INDIAN OCEAN',13,5],[px(5),py(30),'ATLANTIC',11,3]].forEach(([x,y,t,sz,sp])=>{
     const txt=g.append('text').attr('x',x).attr('y',y).text(t).attr('class','olabel');
