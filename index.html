@@ -234,20 +234,12 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
     <div id="pgc" class="pgc"></div>
   </div>
 </div>
-
 <script>
 "use strict";
-/* ============================================================
-   Earth Monitor — Real-time Earth & Space Weather Observatory
-   Clean single-file build. Sections:
-     1. Config & constants   2. Geo data   3. Utilities
-     4. State                5. Data layer (quakes / solar / CME)
-     6. Map                  7. Dashboard  8. Pages  9. Nav/router
-     10. Moon  11. Search   12. Boot
-   ============================================================ */
+/* Earth Monitor — Real-time Earth & Space Weather Observatory (clean build) */
 
 /* ---------- 1. CONFIG & CONSTANTS ---------- */
-const H = 36e5, D = 864e5;                 // ms per hour / day
+const H = 36e5, D = 864e5;
 const QUAKE_FEEDS = [
   { name:'USGS',   url:'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson', transform:transformUSGS,   prio:3 },
   { name:'EMSC',   url:'https://www.seismicportal.eu/fdsnws/event/1/query?format=json&minmag=2.5&limit=100&orderby=time',       transform:transformEMSC,   prio:2 },
@@ -260,15 +252,10 @@ const SWPC = {
   windSpeed: 'https://services.swpc.noaa.gov/products/summary/solar-wind-speed.json',
   ssn:       'https://services.swpc.noaa.gov/json/solar-cycle/observed-solar-cycle-indices.json'
 };
-/* DONKI migrated 2026-09-30 → new base ccmc.gsfc.nasa.gov/DONKI-API/get/.
-   CORS on the new host is unverified, so we fall back through public proxies.
-   For production, swap CME_PROXIES for your own Cloudflare Worker URL. */
+/* CMEs are fetched through your Cloudflare Worker's /cme JSON route (CORS-safe),
+   with public proxies as automatic fallback. ENSO uses the Worker's /oni route. */
+const WORKER_BASE = 'https://long-thunder-a331.mesinjah.workers.dev';
 const DONKI_BASE = 'https://ccmc.gsfc.nasa.gov/DONKI-API/get/CME';
-const CME_PROXIES = [
-  u => u,                                                              // direct
-  u => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
-  u => `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(u)}`
-];
 const DUTCH_CHANNEL = 'UCHE92x768p8h-fMrqhsnE1Q';
 
 /* ---------- 2. GEO DATA ---------- */
@@ -405,17 +392,15 @@ const nowStr = () => new Date().toLocaleString('en-NZ',{dateStyle:'medium',timeS
 
 /* ---------- 4. STATE ---------- */
 let EQ = [];
-let solarData = null;                 // live NOAA space-weather bundle, or null
-let liveCMEs = [];                    // parsed DONKI Earth-directed CMEs
-let cmeStatus = 'loading';            // 'loading' | 'ok' | 'error'
+let solarData = null;
+let liveCMEs = [];
+let cmeStatus = 'loading';
 let isLive = false, lastUpdate = null;
 let selectedId = null, activeTab = 'recent', magFilter = 0;
 let currentPage = 'dashboard', sigTab = 'risk', evSort = 'time', evDir = -1;
 const layers = { quakes:true, plates:false, volcanoes:false, tsunami:true };
 
 /* ---------- 5. DATA LAYER ---------- */
-/* Depth is normalized to a non-negative magnitude — feeds occasionally encode
-   it as a signed elevation, which produced the old "-197 km" artifacts. */
 const normDepth = d => Math.abs(Math.round(d||0));
 function extractRegion(place){
   if(!place) return 'Unknown';
@@ -496,10 +481,15 @@ async function loadSolar(){
 }
 async function fetchDONKI(){
   const end=new Date().toISOString().slice(0,10), start=new Date(Date.now()-7*D).toISOString().slice(0,10);
-  const target=`${DONKI_BASE}?startDate=${start}&endDate=${end}`;
+  const donki=`${DONKI_BASE}?startDate=${start}&endDate=${end}`;
+  const attempts=[
+    `${WORKER_BASE}/cme`,                                              // your Worker (primary, CORS-safe)
+    `https://corsproxy.io/?url=${encodeURIComponent(donki)}`,          // fallback
+    `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(donki)}` // fallback
+  ];
   let err;
-  for(const wrap of CME_PROXIES){
-    try{ const r=await fetch(wrap(target)); if(!r.ok) throw new Error('HTTP '+r.status); return JSON.parse(await r.text()); }
+  for(const url of attempts){
+    try{ const r=await fetch(url); if(!r.ok) throw new Error('HTTP '+r.status); return JSON.parse(await r.text()); }
     catch(e){ err=e; }
   }
   throw err||new Error('all DONKI endpoints failed');
@@ -552,7 +542,6 @@ function buildMap(){
   const rm=rf.append('feMerge'); rm.append('feMergeNode').attr('in','rb'); rm.append('feMergeNode').attr('in','SourceGraphic');
   const vg=defs.append('radialGradient').attr('id','vig').attr('cx','50%').attr('cy','46%').attr('r','58%');
   vg.append('stop').attr('offset','0%').attr('stop-color','transparent'); vg.append('stop').attr('offset','85%').attr('stop-color','transparent'); vg.append('stop').attr('offset','100%').attr('stop-color','rgba(3,5,10,0.5)');
-
   const g=svg.append('g');
   g.append('rect').attr('width',W).attr('height',Hh).attr('fill','url(#oGrad)');
   const depthG=g.append('g').attr('opacity',.06);
@@ -562,20 +551,67 @@ function buildMap(){
   for(let lt=-60;lt<=80;lt+=30){ const y=py(lt); gratG.append('line').attr('x1',0).attr('y1',y).attr('x2',W).attr('y2',y).attr('stroke','rgba(80,120,220,.04)').attr('stroke-width',.4).attr('class','grat'); }
   gratG.append('line').attr('x1',0).attr('y1',py(0)).attr('x2',W).attr('y2',py(0)).attr('stroke','rgba(99,132,241,.08)').attr('stroke-width',.6).attr('stroke-dasharray','8 4').attr('class','grat');
   [23.44,-23.44].forEach(lt=>gratG.append('line').attr('x1',0).attr('y1',py(lt)).attr('x2',W).attr('y2',py(lt)).attr('stroke','rgba(99,132,241,.03)').attr('stroke-width',.3).attr('stroke-dasharray','3 5').attr('class','grat'));
-
   const landG=g.append('g');
   CONTINENTS.forEach(c=>landG.append('path').attr('d',smoothPath(c)).attr('fill','url(#lGrad)').attr('stroke','#2a4468').attr('stroke-width',.6).attr('filter','url(#lShadow)').attr('class','land'));
   const shelfG=g.append('g').attr('opacity',.04);
   CONTINENTS.slice(0,6).forEach(c=>shelfG.append('path').attr('d',smoothPath(c)).attr('fill','none').attr('stroke','#4488cc').attr('stroke-width',4));
-
   const labStyle={fill:'rgba(70,110,200,.07)',fontFamily:'var(--font)',fontWeight:'600',textAnchor:'middle'};
   [[px(180),py(20),'PACIFIC OCEAN',20,8],[px(-160),py(-25),'SOUTH PACIFIC',12,4],[px(70),py(12),'INDIAN OCEAN',13,5],[px(5),py(30),'ATLANTIC',11,3]].forEach(([x,y,t,sz,sp])=>{
     const txt=g.append('text').attr('x',x).attr('y',y).text(t).attr('class','olabel');
     Object.entries(labStyle).forEach(([k,v])=>txt.style(k==='textAnchor'?'text-anchor':k,v));
     txt.style('font-size',sz+'px').style('letter-spacing',sp+'px');
   });
-
-  const rofG=g.append('g').style('display
+  const rofG=g.append('g').style('display','none').attr('class','rof-group');
+  [ROF_WEST,ROF_EAST].forEach(r=>rofG.append('path').attr('d',smoothLine(r)).attr('fill','none').attr('stroke','rgba(249,115,22,.45)').attr('stroke-width',2).attr('stroke-dasharray','8 5').attr('stroke-linecap','round').attr('filter','url(#rofGlow)').attr('class','rof'));
+  Object.values(PLATES).forEach(p=>rofG.append('path').attr('d',smoothLine(p)).attr('fill','none').attr('stroke','rgba(168,85,247,.35)').attr('stroke-width',1.2).attr('stroke-dasharray','5 4').attr('stroke-linecap','round').attr('class','rof'));
+  const impactKp = (liveCMEs.find(c=>c.kpPred)||{}).kpPred || (solarData&&typeof solarData.kp==='number'?solarData.kp:0);
+  if(impactKp>=5){
+    const cmeG=g.append('g').attr('class','cme-impact');
+    [{y1:py(75),y2:py(63),fill:'rgba(249,115,22,.12)'},{y1:py(63),y2:py(55),fill:'rgba(249,115,22,.07)'},{y1:py(55),y2:py(48),fill:'rgba(249,115,22,.03)'},
+     {y1:py(-63),y2:py(-75),fill:'rgba(249,115,22,.12)'},{y1:py(-55),y2:py(-63),fill:'rgba(249,115,22,.07)'},{y1:py(-48),y2:py(-55),fill:'rgba(249,115,22,.03)'}
+    ].forEach(z=>cmeG.append('rect').attr('x',0).attr('y',Math.min(z.y1,z.y2)).attr('width',W).attr('height',Math.abs(z.y2-z.y1)).attr('fill',z.fill));
+    [55,-55].forEach(lat=>cmeG.append('line').attr('x1',0).attr('y1',py(lat)).attr('x2',W).attr('y2',py(lat)).attr('stroke','rgba(249,115,22,.25)').attr('stroke-width',.8).attr('stroke-dasharray','6 4'));
+    cmeG.append('text').attr('x',px(180)).attr('y',py(68)).attr('text-anchor','middle').attr('fill','rgba(249,115,22,.4)').attr('font-size','9').attr('font-family','var(--mono)').attr('letter-spacing','2px').text('GEOMAGNETIC IMPACT ZONE — Kp '+impactKp).attr('class','olabel');
+    cmeG.append('text').attr('x',px(180)).attr('y',py(58)).attr('text-anchor','middle').attr('fill','rgba(249,115,22,.25)').attr('font-size','7').attr('font-family','var(--mono)').text('Aurora visible · Power grid risk · HF radio disruption').attr('class','olabel');
+    cmeG.append('text').attr('x',px(180)).attr('y',py(-68)).attr('text-anchor','middle').attr('fill','rgba(249,115,22,.3)').attr('font-size','8').attr('font-family','var(--mono)').attr('letter-spacing','2px').text('SOUTHERN IMPACT ZONE').attr('class','olabel');
+  }
+  const volG=g.append('g').style('display','none').attr('class','vol-group');
+  VOLCANOES.forEach(v=>{ const x=px(v.lng),y=py(v.lat); volG.append('polygon').attr('points',`${x},${y-5} ${x-3.5},${y+2.5} ${x+3.5},${y+2.5}`).attr('fill','rgba(249,115,22,.75)').attr('stroke','rgba(249,115,22,.35)').attr('stroke-width',.8).attr('class','vm'); });
+  const tsunamiG=g.append('g').attr('class','tsunami-group');
+  EQ.filter(e=>e.tsunami).forEach(e=>{ const cx=px(e.lng),cy=py(e.lat); [32,22,14].forEach((r,i)=>tsunamiG.append('circle').attr('cx',cx).attr('cy',cy).attr('r',r).attr('fill','none').attr('stroke',`rgba(239,68,68,${.12-.03*i})`).attr('stroke-width',.8).attr('stroke-dasharray',i===0?'5 4':'3 3')); });
+  const eqG=g.append('g');
+  function animatePulse(node,baseR,delay){
+    let start=null; const dur=2000;
+    (function tick(ts){ if(!start)start=ts+delay; const el=ts-start; if(el<0){requestAnimationFrame(tick);return;} const t=(el%dur)/dur; node.setAttribute('r',baseR+4+t*26); node.setAttribute('stroke-opacity',0.45*(1-t)); node.setAttribute('stroke-width',2*(1-t)+0.2); if(node.parentNode)requestAnimationFrame(tick); })(performance.now());
+  }
+  function renderMarkers(){
+    eqG.selectAll('*').remove();
+    [...EQ].sort((a,b)=>a.mag-b.mag).forEach(e=>{
+      const cx=px(e.lng),cy=py(e.lat),r=magR(e.mag),col=magColor(e.mag),isSel=e.id===selectedId;
+      if(isSel){ animatePulse(eqG.append('circle').attr('cx',cx).attr('cy',cy).attr('class','pulse-ring').attr('stroke',col).node(),r,0); animatePulse(eqG.append('circle').attr('cx',cx).attr('cy',cy).attr('class','pulse-ring').attr('stroke',col).node(),r,900); }
+      eqG.append('circle').attr('cx',cx).attr('cy',cy).attr('r',r*1.8).attr('fill',col).attr('fill-opacity',.08).attr('pointer-events','none');
+      const circle=eqG.append('circle').attr('cx',cx).attr('cy',cy).attr('r',r).attr('fill',col).attr('fill-opacity',.55).attr('stroke',col).attr('stroke-width',1.2).attr('stroke-opacity',.9).attr('filter',isSel?'url(#mkGlow)':'none').style('cursor','pointer').attr('class','eq-mk');
+      circle.on('click',ev=>{ ev.stopPropagation(); selectedId=e.id; activeTab='detail'; renderMarkers(); renderPanel(); updateTabs(); });
+      circle.on('mouseenter',()=>{ const tip=document.getElementById('tip'); tip.style.display='block'; tip.innerHTML=`<div class="mg" style="color:${col}">M ${e.mag.toFixed(1)}</div><div class="lc">${e.loc}</div><div class="dp">${depthLabel(e.depth)} · ${e.depth} km · ${relTime(e.time)}</div>`; });
+      circle.on('mousemove',ev=>{ const tip=document.getElementById('tip'); tip.style.left=(ev.clientX+14)+'px'; tip.style.top=(ev.clientY-10)+'px'; });
+      circle.on('mouseleave',()=>{ document.getElementById('tip').style.display='none'; });
+    });
+  }
+  renderMarkers();
+  g.append('rect').attr('width',W).attr('height',Hh).attr('fill','url(#vig)').attr('pointer-events','none');
+  svg.on('click',()=>{ selectedId=null; renderMarkers(); renderPanel(); });
+  const zoom=d3.zoom().scaleExtent([1,10]).translateExtent([[-100,-50],[W+100,Hh+50]]).on('zoom',event=>{
+    g.attr('transform',event.transform); const k=event.transform.k;
+    eqG.selectAll('.eq-mk').each(function(){ const eq=EQ.find(e=>Math.abs(px(e.lng)-+this.getAttribute('cx'))<0.5 && Math.abs(py(e.lat)-+this.getAttribute('cy'))<0.5); if(eq) this.setAttribute('r',magR(eq.mag)/k); });
+    g.selectAll('.olabel').each(function(){ const o=+this.dataset.sz||parseFloat(this.style.fontSize); if(!this.dataset.sz)this.dataset.sz=o; this.style.fontSize=(o/k)+'px'; const sp=+this.dataset.sp||parseFloat(this.style.letterSpacing); if(!this.dataset.sp)this.dataset.sp=sp; this.style.letterSpacing=(sp/k)+'px'; });
+    g.selectAll('.grat').attr('stroke-width',.4/k); g.selectAll('.land').attr('stroke-width',.6/k); g.selectAll('.rof').attr('stroke-width',2/k);
+  });
+  svg.call(zoom);
+  const k0=1.35, tx0=(W/2)*(1-k0), ty0=(Hh*0.44)*(1-k0);
+  svg.call(zoom.transform, d3.zoomIdentity.translate(tx0,ty0).scale(k0));
+  window.toggleLayer=name=>{ layers[name]=!layers[name]; if(name==='plates')rofG.style('display',layers.plates?null:'none'); if(name==='volcanoes')volG.style('display',layers.volcanoes?null:'none'); if(name==='tsunami')tsunamiG.style('display',layers.tsunami?null:'none'); renderLayers(); };
+  window.refreshMarkers=renderMarkers;
+}
 /* ---------- 7. DASHBOARD ---------- */
 function renderCMEBanner(){
   const banner=document.getElementById('cme-banner'); if(!banner) return;
@@ -587,7 +623,7 @@ function renderCMEBanner(){
     banner.innerHTML=`<div class="cme-bar" style="background:rgba(239,68,68,.05);border-color:rgba(239,68,68,.25)"><div class="cme-icon" style="background:rgba(239,68,68,.15);color:var(--red)">⚠</div><div class="cme-body"><div class="cme-title" style="color:var(--red)">CME data unavailable</div><div class="cme-meta">Couldn't reach NASA DONKI — status unknown, not an all-clear. Retrying shortly.</div></div></div>`; return;
   }
   const active=liveCMEs.filter(c=>c.eta==null||c.eta>Date.now());
-  if(!active.length){ banner.innerHTML=''; return; }   // genuine all-clear → hidden
+  if(!active.length){ banner.innerHTML=''; return; }
   banner.innerHTML=active.map(c=>`<div class="cme-bar clickable" onclick="switchPage('signals','solar')">
     <div class="cme-icon">☀</div>
     <div class="cme-body"><div class="cme-title">CME — ${c.type}${c.speed?' at '+c.speed+' km/s':''} from ${c.source}</div>
@@ -661,8 +697,6 @@ function renderPanel(){
   }
 }
 window.selectEq=id=>{ selectedId=id; activeTab='detail'; updateTabs(); renderPanel(); if(window.refreshMarkers) window.refreshMarkers(); };
-
-/* dashboard charts */
 function renderCharts(){
   document.getElementById('charts').innerHTML=`
     <div class="cc"><div class="cc-t">7-Day Activity</div><div class="cw" id="ch-activity"></div></div>
@@ -719,7 +753,6 @@ function refreshQuakeViews(){
   if(window.refreshMarkers) window.refreshMarkers();
 }
 /* ---------- 8. PAGES ---------- */
-/* Events & Alerts (toggle between the two) */
 function eaToggle(active){
   return `<div style="display:flex;gap:6px;margin-bottom:14px">
     <button class="fc${active==='events'?' on':''}" onclick="renderEventsPage(document.getElementById('pgc'))" style="cursor:pointer;padding:6px 14px">All Events</button>
@@ -767,8 +800,6 @@ function renderAlertsPage(el){
     <div class="pg-section"><h2>Recent Minor Activity</h2>
       ${recent.map(e=>`<div class="alert-card" onclick="goToEq('${e.id}')" style="cursor:pointer"><div class="alert-icon" style="background:${magBg(e.mag)};color:${magColor(e.mag)};font-family:var(--mono);font-weight:700;font-size:13px">${e.mag.toFixed(1)}</div><div class="alert-body"><div class="alert-title">${e.loc}</div><div class="alert-meta">${relTime(e.time)} · Depth ${e.depth} km</div></div></div>`).join('')}</div>`;
 }
-
-/* Analytics */
 function renderAnalyticsPage(el){
   const avgMag=EQ.length?(EQ.reduce((s,e)=>s+e.mag,0)/EQ.length).toFixed(1):'0.0';
   const avgDepth=EQ.length?Math.round(EQ.reduce((s,e)=>s+e.depth,0)/EQ.length):0;
@@ -789,7 +820,6 @@ function renderAnalyticsPage(el){
   drawActivity('#an-activity',440,200,{t:14,r:14,b:26,l:32},2,3.5,9,'aGrad2');
   drawMag('#an-mag',440,200,{t:14,r:14,b:26,l:32},.65,9);
   drawRegion('#an-region',440,200,{t:8,r:14,b:8,l:90},20,10);
-  // scatter
   const w=440,h=200,p={t:14,r:14,b:30,l:40},iw=w-p.l-p.r,ih=h-p.t-p.b;
   const svg=d3.select('#an-scatter').append('svg').attr('viewBox',`0 0 ${w} ${h}`),g_=svg.append('g').attr('transform',`translate(${p.l},${p.t})`);
   const xS=d3.scaleLinear().domain([2,8]).range([0,iw]),yS=d3.scaleLog().domain([5,600]).range([0,ih]);
@@ -799,8 +829,6 @@ function renderAnalyticsPage(el){
   g_.append('text').attr('x',iw/2).attr('y',ih+24).attr('text-anchor','middle').attr('fill','#6b7a94').attr('font-size','9').text('Magnitude');
   g_.append('text').attr('x',-ih/2).attr('y',-30).attr('text-anchor','middle').attr('fill','#6b7a94').attr('font-size','9').attr('transform','rotate(-90)').text('Depth (km)');
 }
-
-/* Settings */
 function renderSettingsPage(el){
   const saved=[{name:'Wainui, Auckland',lat:-36.58,lng:174.98},{name:'Wellington, NZ',lat:-41.29,lng:174.78},{name:'San Francisco, CA',lat:37.77,lng:-122.42},{name:'Tokyo, Japan',lat:35.68,lng:139.69}];
   saved.forEach(loc=>{ const nearby=EQ.filter(e=>Math.sqrt((e.lat-loc.lat)**2+(e.lng-loc.lng)**2)*111<500).sort((a,b)=>b.time-a.time); loc.lastEq=nearby[0]||null; loc.count=nearby.length; });
@@ -825,21 +853,19 @@ function renderSettingsPage(el){
       <div class="set-row"><span class="set-label">NOAA SWPC — Space Weather</span><span class="set-val" style="color:${solarData?'var(--green)':'var(--amber)'}">${solarData?'Connected':'Pending'}</span></div>
       <div class="set-row"><span class="set-label">NASA DONKI — CME alerts</span><span class="set-val" style="color:${cmeStatus==='ok'?'var(--green)':cmeStatus==='error'?'var(--red)':'var(--amber)'}">${cmeStatus==='ok'?'Connected':cmeStatus==='error'?'Unavailable':'Loading'}</span></div></div>`;
 }
-
-/* Solar (NOAA SWPC) + live imagery + live CME alerts */
 function renderSolarPage(el){
   const d=solarData||{kp:'—',flares:[],wind:{speed:'—',bt:'—',bz:'—'},sunspots:'—'};
   const kpNum=typeof d.kp==='number'?d.kp:0;
   const kpCol=kpNum<=2?'#22c55e':kpNum<=4?'#eab308':kpNum<=6?'#f97316':'#ef4444';
   const kpLbl=kpNum<=1?'Quiet':kpNum<=3?'Unsettled':kpNum<=4?'Active':kpNum<=6?'Storm':'Severe Storm';
   const live=!!solarData;
-  const cmeCard=(()=>{
-    if(cmeStatus==='loading') return `<div class="alert-card info"><div class="alert-icon" style="background:var(--acc-bg);color:var(--acc)">☀</div><div class="alert-body"><div class="alert-title">Checking NASA DONKI…</div><div class="alert-meta">Fetching Earth-directed CME forecasts</div></div></div>`;
-    if(cmeStatus==='error') return `<div class="alert-card critical"><div class="alert-icon" style="background:rgba(239,68,68,.15);color:var(--red)">⚠</div><div class="alert-body"><div class="alert-title" style="color:var(--red)">CME data unavailable</div><div class="alert-meta">Couldn't reach NASA DONKI — status unknown, not an all-clear.</div></div></div>`;
-    const cmes=liveCMEs.filter(c=>c.eta==null||c.eta>Date.now()-D);
-    if(!cmes.length) return `<div class="alert-card info"><div class="alert-icon" style="background:rgba(34,197,94,.15);color:var(--green)">✓</div><div class="alert-body"><div class="alert-title">No Earth-directed CMEs</div><div class="alert-meta">No coronal mass ejections currently heading toward Earth</div></div></div>`;
-    return cmes.map(c=>`<div class="alert-card critical" style="margin:0 0 8px"><div class="alert-icon" style="background:rgba(249,115,22,.15);color:var(--orange);font-size:16px">☀</div><div class="alert-body"><div class="alert-title">${c.type} CME${c.speed?' — '+c.speed+' km/s':''}${c.source?' · '+c.source:''}</div><div class="alert-meta">Detected ${relAgo(c.detected)} · ETA ${etaTo(c.eta)}</div>${c.kpPred?`<div style="margin-top:6px;font-size:11px;color:var(--tx2)">Predicted Kp ${c.kpPred}.</div>`:''}</div></div>`).join('');
-  })();
+  let cmeCard;
+  if(cmeStatus==='loading') cmeCard=`<div class="alert-card info"><div class="alert-icon" style="background:var(--acc-bg);color:var(--acc)">☀</div><div class="alert-body"><div class="alert-title">Checking NASA DONKI…</div><div class="alert-meta">Fetching Earth-directed CME forecasts</div></div></div>`;
+  else if(cmeStatus==='error') cmeCard=`<div class="alert-card critical"><div class="alert-icon" style="background:rgba(239,68,68,.15);color:var(--red)">⚠</div><div class="alert-body"><div class="alert-title" style="color:var(--red)">CME data unavailable</div><div class="alert-meta">Couldn't reach NASA DONKI — status unknown, not an all-clear.</div></div></div>`;
+  else { const cmes=liveCMEs.filter(c=>c.eta==null||c.eta>Date.now()-D);
+    cmeCard=cmes.length?cmes.map(c=>`<div class="alert-card critical" style="margin:0 0 8px"><div class="alert-icon" style="background:rgba(249,115,22,.15);color:var(--orange);font-size:16px">☀</div><div class="alert-body"><div class="alert-title">${c.type} CME${c.speed?' — '+c.speed+' km/s':''}${c.source?' · '+c.source:''}</div><div class="alert-meta">Detected ${relAgo(c.detected)} · ETA ${etaTo(c.eta)}</div>${c.kpPred?`<div style="margin-top:6px;font-size:11px;color:var(--tx2)">Predicted Kp ${c.kpPred}.</div>`:''}</div></div>`).join('')
+      :`<div class="alert-card info"><div class="alert-icon" style="background:rgba(34,197,94,.15);color:var(--green)">✓</div><div class="alert-body"><div class="alert-title">No Earth-directed CMEs</div><div class="alert-meta">No coronal mass ejections currently heading toward Earth</div></div></div>`;
+  }
   el.innerHTML=`
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding:10px 14px;background:var(--card);border:1px solid var(--bdr);border-radius:10px">
       <div><span style="font-size:11px;color:var(--tx2)">Last Updated</span><div style="font-family:var(--mono);font-size:13px;margin-top:2px">${nowStr()}</div></div>
@@ -894,11 +920,10 @@ function mountSolarImagery(){
     }
   });
 }
-/* ENSO */
 let ensoData=null;
 async function loadENSO(){
   try{
-    const txt=await fetch('https://corsproxy.io/?url='+encodeURIComponent('https://www.cpc.ncep.noaa.gov/data/indices/oni.ascii.txt')).then(r=>r.text());
+    const txt=await fetch(`${WORKER_BASE}/oni`).then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); });
     const rows=txt.trim().split('\n').slice(1).map(l=>l.trim().split(/\s+/));
     const parsed=rows.filter(r=>r.length>=4).map(r=>({m:r[0],yr:+r[1],v:parseFloat(r[3])})).filter(r=>isFinite(r.v));
     if(parsed.length) ensoData=parsed.slice(-19);
@@ -983,16 +1008,14 @@ function drawSSTMap(oniVal){
   CONTINENTS.forEach(c=>g.append('path').attr('d',smoothPath(c)).attr('fill','#141e35').attr('stroke','#1e2d4a').attr('stroke-width',.4).attr('class','l-sst'));
   [[px(175),py(-38),'New Zealand',9],[px(135),py(-25),'Australia',9],[px(-75),py(-15),'S. America',9],[px(-115),py(40),'N. America',9],[px(140),py(35),'Japan',8],[px(120),py(-5),'Indonesia',8]].forEach(([x,y,t,s])=>g.append('text').attr('x',x).attr('y',y).attr('text-anchor','middle').attr('fill','rgba(255,255,255,.12)').attr('font-size',s).text(t).attr('class','sl'));
   g.append('text').attr('x',px(-160)).attr('y',py(30)).attr('text-anchor','middle').attr('fill','rgba(255,255,255,.06)').attr('font-size','14').attr('letter-spacing','5px').text('PACIFIC OCEAN').attr('class','sl');
-  const lg=g.append('g').attr('transform',`translate(${mw-150},${mh-55})`);
-  lg.append('rect').attr('width',140).attr('height',48).attr('rx',6).attr('fill','rgba(7,11,21,.85)').attr('stroke','rgba(99,102,241,.1)');
-  lg.append('rect').attr('x',8).attr('y',8).attr('width',12).attr('height',8).attr('rx',2).attr('fill','rgba(239,68,68,.3)'); lg.append('text').attr('x',24).attr('y',15).attr('fill','#6b7a94').attr('font-size','8').text('Warmer than normal').attr('class','sl');
-  lg.append('rect').attr('x',8).attr('y',22).attr('width',12).attr('height',8).attr('rx',2).attr('fill','rgba(59,130,246,.3)'); lg.append('text').attr('x',24).attr('y',29).attr('fill','#6b7a94').attr('font-size','8').text('Cooler than normal').attr('class','sl');
-  lg.append('rect').attr('x',8).attr('y',36).attr('width',12).attr('height',4).attr('rx',1).attr('fill','none').attr('stroke','#eab308').attr('stroke-width',1).attr('stroke-dasharray','3 2'); lg.append('text').attr('x',24).attr('y',42).attr('fill','#6b7a94').attr('font-size','8').text('Niño 3.4 monitoring box').attr('class','sl');
+  const lgd=g.append('g').attr('transform',`translate(${mw-150},${mh-55})`);
+  lgd.append('rect').attr('width',140).attr('height',48).attr('rx',6).attr('fill','rgba(7,11,21,.85)').attr('stroke','rgba(99,102,241,.1)');
+  lgd.append('rect').attr('x',8).attr('y',8).attr('width',12).attr('height',8).attr('rx',2).attr('fill','rgba(239,68,68,.3)'); lgd.append('text').attr('x',24).attr('y',15).attr('fill','#6b7a94').attr('font-size','8').text('Warmer than normal').attr('class','sl');
+  lgd.append('rect').attr('x',8).attr('y',22).attr('width',12).attr('height',8).attr('rx',2).attr('fill','rgba(59,130,246,.3)'); lgd.append('text').attr('x',24).attr('y',29).attr('fill','#6b7a94').attr('font-size','8').text('Cooler than normal').attr('class','sl');
+  lgd.append('rect').attr('x',8).attr('y',36).attr('width',12).attr('height',4).attr('rx',1).attr('fill','none').attr('stroke','#eab308').attr('stroke-width',1).attr('stroke-dasharray','3 2'); lgd.append('text').attr('x',24).attr('y',42).attr('fill','#6b7a94').attr('font-size','8').text('Niño 3.4 monitoring box').attr('class','sl');
   const zm=d3.zoom().scaleExtent([1,8]).translateExtent([[-100,-50],[mw+100,mh+50]]).on('zoom',ev=>{ g.attr('transform',ev.transform); const k=ev.transform.k; g.selectAll('.g-sst').attr('stroke-width',.3/k); g.selectAll('.l-sst').attr('stroke-width',.4/k); g.selectAll('.sl').each(function(){ const o=+this.dataset.fs||parseFloat(this.getAttribute('font-size'))||9; if(!this.dataset.fs)this.dataset.fs=o; this.setAttribute('font-size',o/k); }); });
   svg.call(zm); const k0=1.3,tx0=(mw/2)*(1-k0),ty0=(mh*0.5)*(1-k0); svg.call(zm.transform,d3.zoomIdentity.translate(tx0,ty0).scale(k0));
 }
-
-/* Schumann (prediction model from live Kp) */
 function renderSchumannPage(el){
   const harmonics=[{n:1,freq:7.83,name:'Fundamental'},{n:2,freq:14.3,name:'2nd Harmonic'},{n:3,freq:20.8,name:'3rd Harmonic'},{n:4,freq:27.3,name:'4th Harmonic'},{n:5,freq:33.8,name:'5th Harmonic'},{n:6,freq:39.0,name:'6th Harmonic'}];
   const kp=solarData?solarData.kp:3, perturbation=kp*0.03, ampBoost=1+kp*0.08;
@@ -1019,7 +1042,6 @@ function renderSchumannPage(el){
         <div class="alert-card" style="margin:0 0 8px"><div class="alert-icon" style="background:var(--acc-bg);color:var(--acc);font-size:14px">📡</div><div class="alert-body"><div class="alert-title">Tomsk State University, Russia</div><div class="alert-meta">sosrff.tsu.ru · Primary SR monitoring station</div></div></div>
         <div class="alert-card" style="margin:0"><div class="alert-icon" style="background:var(--acc-bg);color:var(--acc);font-size:14px">💚</div><div class="alert-body"><div class="alert-title">HeartMath Institute GCI</div><div class="alert-meta">6 magnetometer sites worldwide</div></div></div></div>
     </div>`;
-  // spectrum
   const w=900,h=220,p={t:16,r:20,b:30,l:50},iw=w-p.l-p.r,ih=h-p.t-p.b;
   const svg=d3.select('#sr-spectrum').append('svg').attr('viewBox',`0 0 ${w} ${h}`),g_=svg.append('g').attr('transform',`translate(${p.l},${p.t})`);
   const xS=d3.scaleLinear().domain([0,50]).range([0,iw]),yS=d3.scaleLinear().domain([0,1.2]).range([ih,0]);
@@ -1032,8 +1054,6 @@ function renderSchumannPage(el){
   [0,10,20,30,40,50].forEach(v=>g_.append('text').attr('x',xS(v)).attr('y',ih+18).attr('text-anchor','middle').attr('fill','#6b7a94').attr('font-size','9').attr('font-family','var(--mono)').text(v+' Hz'));
   g_.append('text').attr('x',-ih/2).attr('y',-38).attr('text-anchor','middle').attr('fill','#6b7a94').attr('font-size','9').attr('transform','rotate(-90)').text('Relative Amplitude');
 }
-
-/* Seismic Risk Factors */
 function renderRiskPage(el){
   const now=new Date(), p=getMoonPhase(now), m=moonPhaseName(p), stress=tidalStress(p);
   const stressCol=stress>0.7?'#f97316':stress>0.4?'#eab308':'#22c55e', stressLbl=stress>0.7?'Elevated':stress>0.4?'Moderate':'Low';
@@ -1068,7 +1088,6 @@ function renderRiskPage(el){
       <div class="an-card"><h3>Upcoming Tidal Windows</h3>${[{label:'Next Full Moon',date:nextFull,emoji:'🌕'},{label:'Next New Moon',date:nextNew,emoji:'🌑'}].map(w=>{ const du=Math.round((w.date.getTime()-now.getTime())/D); return `<div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--bdr)"><span style="font-size:28px">${w.emoji}</span><div style="flex:1"><div style="font-size:12px;font-weight:500">${w.label}</div><div style="font-size:11px;color:var(--tx2);font-family:var(--mono)">${w.date.toLocaleDateString('en-NZ',{dateStyle:'medium',timeZone:'Pacific/Auckland'})}</div><div style="font-size:10px;color:#f97316">Maximum tidal stress</div></div><div style="text-align:right"><div style="font-family:var(--mono);font-size:16px;font-weight:700;color:#f97316">${du}d</div><div style="font-size:9px;color:var(--tx2)">away</div></div></div>`; }).join('')}
         <div style="margin-top:14px;font-size:11px;color:var(--tx2)"><div style="font-weight:500;margin-bottom:6px">Research References</div><div>Métivier et al. (2009) — Earth tides & earthquake correlation</div><div>Ide et al. (2016) — Tidal stress and deep tremor</div><div>Bendick & Bilham (2017) — Earth rotation & seismicity cycles</div><div>Hayakawa et al. (2012) — Ionospheric SR anomalies (contested)</div></div></div>
     </div>`;
-  // moon/tidal chart
   const w=900,h=180,p_={t:20,r:20,b:30,l:45},iw=w-p_.l-p_.r,ih=h-p_.t-p_.b;
   const svg=d3.select('#risk-moon-chart').append('svg').attr('viewBox',`0 0 ${w} ${h}`),g_=svg.append('g').attr('transform',`translate(${p_.l},${p_.t})`);
   const xS=d3.scaleLinear().domain([-15,15]).range([0,iw]),yS=d3.scaleLinear().domain([0,1]).range([ih,0]);
@@ -1083,8 +1102,6 @@ function renderRiskPage(el){
   [-15,-10,-5,0,5,10,15].forEach(d=>g_.append('text').attr('x',xS(d)).attr('y',ih+16).attr('text-anchor','middle').attr('fill','#6b7a94').attr('font-size','8').attr('font-family','var(--mono)').text(d===0?'Today':(d>0?'+':'')+d+'d'));
   [0,0.5,1].forEach(v=>{ g_.append('text').attr('x',-8).attr('y',yS(v)+3).attr('text-anchor','end').attr('fill','#6b7a94').attr('font-size','8').attr('font-family','var(--mono)').text(v===0?'Low':v===0.5?'Med':'High'); g_.append('line').attr('x1',0).attr('y1',yS(v)).attr('x2',iw).attr('y2',yS(v)).attr('stroke','rgba(99,102,241,.06)').attr('stroke-width',.5); });
 }
-
-/* Live stream (independent commentary — clearly labelled non-authoritative) */
 function renderLivePage(el){
   el.innerHTML=`
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding:10px 14px;background:var(--card);border:1px solid var(--bdr);border-radius:10px">
@@ -1096,7 +1113,6 @@ function renderLivePage(el){
     <div class="an-grid"><div class="an-card" style="grid-column:1/-1;padding:0;overflow:hidden"><div style="position:relative;padding-top:56.25%;background:#0a0a0a"><iframe style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" src="https://www.youtube.com/embed/live_stream?channel=${DUTCH_CHANNEL}&autoplay=1&mute=1" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe></div></div></div>
     <div style="margin-top:10px;font-size:11px;color:var(--tx2)">Auto-rolls to whatever dutchsinse is streaming now. If it says "unavailable", he's offline — see <a href="https://www.youtube.com/@dutchsinse/streams" target="_blank" style="color:var(--acc)">his channel</a>.</div>`;
 }
-/* Signals wrapper (Risk / Solar / Schumann / ENSO sub-tabs) */
 function renderSignalsPage(el){
   const SIG={risk:'Seismic Risk',solar:'Solar',schumann:'Schumann',enso:'ENSO'};
   const render={risk:renderRiskPage,solar:renderSolarPage,schumann:renderSchumannPage,enso:renderENSOPage};
@@ -1179,10 +1195,10 @@ document.getElementById('moon-ind').addEventListener('click',()=>switchPage('sig
 renderCards(); renderCMEBanner(); renderLayers(); renderFilters(); renderPanel(); buildMap(); renderCharts();
 updateMoonIndicator(); wireSearch();
 
-loadQuakes();   // USGS → EMSC → GeoNet, merged
-loadSolar();    // NOAA SWPC
-loadCMEs();     // NASA DONKI (new endpoint)
-loadENSO();     // NOAA CPC ONI
+loadQuakes();
+loadSolar();
+loadCMEs();
+loadENSO();
 
 setInterval(loadQuakes, 60*1000);
 setInterval(loadSolar, 60*1000);
