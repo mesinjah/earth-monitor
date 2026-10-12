@@ -2437,5 +2437,146 @@ function renderLivePage(el){
   .cards,.cr,#cme-banner{padding-left:12px;padding-right:12px}
 }
 </style>
+<script>
+/* ===== Real CME alerts (NASA DONKI) — overrides demo + fixes silent-failure ===== */
+(function(){
+  const NASA_KEY = 'Q7K9SiJyFeqdj4fadSxIWlY1C5RyTplyWyP0t8JC'; // your key
+  const H = 36e5;
+  window._liveCMEs = [];
+  window._cmeStatus = 'loading';           // 'loading' | 'ok' | 'error'
+
+  const relT = t => { const h=Math.floor((Date.now()-t)/H); return h<1?'<1h ago':h<24?h+'h ago':Math.floor(h/24)+'d ago'; };
+  const etaT = t => { if(t==null) return '—'; if(t<=Date.now()) return 'arrived'; const m=Math.round((t-Date.now())/6e4); return m>=60?`${Math.floor(m/60)}h ${m%60}m`:`${m}m`; };
+
+  async function fetchDONKI(){
+    const end   = new Date().toISOString().slice(0,10);
+    const start = new Date(Date.now()-7*864e5).toISOString().slice(0,10);
+    // Primary: api.nasa.gov is CORS-enabled — no proxy needed
+    try{
+      const r = await fetch(`https://api.nasa.gov/DONKI/CME?startDate=${start}&endDate=${end}&api_key=${NASA_KEY}`);
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      return await r.json();
+    }catch(e){
+      // Fallback: CCMC endpoint via proxy (last resort)
+      const prox = `https://api.allorigins.win/raw?url=${encodeURIComponent('https://kauai.ccmc.gsfc.nasa.gov/DONKI/WS/get/CME?startDate='+start+'&endDate='+end)}`;
+      const r2 = await fetch(prox);
+      if(!r2.ok) throw new Error('proxy HTTP '+r2.status);
+      return JSON.parse(await r2.text());
+    }
+  }
+
+  function parseCMEs(data){
+    const typeName = {S:'Slow',C:'Common',O:'Occasional',R:'Rare',ER:'Extremely Rare'};
+    const out = [];
+    (Array.isArray(data)?data:[]).forEach(c=>{
+      const analyses = c.cmeAnalyses || [];
+      if(!analyses.length) return;
+      // Earth-directed if ANY analysis has an ENLIL entry flagged isEarthGB or carrying a shock-arrival time
+      let arrival = null, kpArr = null, earth = false;
+      analyses.forEach(a=>{
+        (a.enlilList||[]).forEach(e=>{
+          const t = e.estimatedShockArrivalTime ? new Date(e.estimatedShockArrivalTime).getTime() : null;
+          if(e.isEarthGB === true || t != null){
+            earth = true;
+            if(t != null && (arrival == null || t < arrival)){ arrival = t; kpArr = [e.kp_90,e.kp_135,e.kp_180]; }
+          }
+        });
+      });
+      if(!earth) return;
+      const an = analyses.find(a=>a.isMostAccurate) || analyses[analyses.length-1];
+      const kp = (kpArr||[]).filter(k=>k!=null);
+      out.push({
+        type: typeName[an.type] || 'CME',
+        speed: an.speed ? Math.round(an.speed) : null,
+        detected: new Date(c.startTime).getTime(),
+        eta: arrival,                          // null = Earth-directed glancing blow, no modeled shock time
+        kpPred: kp.length ? Math.round(Math.max(...kp)) : null,
+        source: c.activeRegionNum ? ('AR'+c.activeRegionNum) : 'Unlabeled region'
+      });
+    });
+    return out;
+  }
+
+  // ---- Banner (dashboard) ----
+  window.renderCMEBanner = function(){
+    const banner = document.getElementById('cme-banner');
+    if(!banner) return;
+    if(typeof currentPage!=='undefined' && currentPage!=='dashboard'){ banner.innerHTML=''; return; }
+    const st = window._cmeStatus;
+    if(st==='loading'){
+      banner.innerHTML = `<div class="cme-bar" style="background:rgba(99,102,241,.05);border-color:var(--bdr2);cursor:default">
+        <div class="cme-icon" style="background:var(--acc-bg);color:var(--acc)">☀</div>
+        <div class="cme-body"><div class="cme-title" style="color:var(--tx2)">Checking NASA DONKI for Earth-directed CMEs…</div></div></div>`;
+      return;
+    }
+    if(st==='error'){
+      banner.innerHTML = `<div class="cme-bar" style="background:rgba(239,68,68,.05);border-color:rgba(239,68,68,.25);cursor:default">
+        <div class="cme-icon" style="background:rgba(239,68,68,.15);color:var(--red)">⚠</div>
+        <div class="cme-body"><div class="cme-title" style="color:var(--red)">CME data unavailable</div>
+        <div class="cme-meta">Couldn't reach NASA DONKI — status unknown, not an all-clear. Retrying shortly.</div></div></div>`;
+      return;
+    }
+    const active = (window._liveCMEs||[]).filter(c=> c.eta==null || c.eta>Date.now());
+    if(!active.length){ banner.innerHTML=''; return; }   // genuine all-clear → banner hidden
+    banner.innerHTML = active.map(c=>`<div class="cme-bar" onclick="switchPage('solar')">
+      <div class="cme-icon">☀</div>
+      <div class="cme-body">
+        <div class="cme-title">CME — ${c.type}${c.speed?' at '+c.speed+' km/s':''} from ${c.source}</div>
+        <div class="cme-meta">Detected ${relT(c.detected)}${c.kpPred?' · Predicted Kp '+c.kpPred:''} · NASA DONKI · Click for details</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0"><div class="cme-eta">${etaT(c.eta)}</div><div class="cme-eta-label">ETA to Earth</div></div>
+    </div>`).join('');
+  };
+
+  // ---- Solar page "CME Alerts" card ----
+  if(typeof renderSolarPage==='function'){
+    const _solar = renderSolarPage;
+    renderSolarPage = function(el){
+      _solar(el);
+      setTimeout(()=>{
+        const card = [...el.querySelectorAll('.an-card')].find(c=>{ const h=c.querySelector('h3'); return h && /CME Alerts/i.test(h.textContent); });
+        if(!card) return;
+        const st = window._cmeStatus;
+        let body;
+        if(st==='loading'){
+          body = `<div class="alert-card info"><div class="alert-icon" style="background:var(--acc-bg);color:var(--acc)">☀</div>
+            <div class="alert-body"><div class="alert-title">Checking NASA DONKI…</div><div class="alert-meta">Fetching Earth-directed CME forecasts</div></div></div>`;
+        } else if(st==='error'){
+          body = `<div class="alert-card critical"><div class="alert-icon" style="background:rgba(239,68,68,.15);color:var(--red)">⚠</div>
+            <div class="alert-body"><div class="alert-title" style="color:var(--red)">CME data unavailable</div><div class="alert-meta">Couldn't reach NASA DONKI — status unknown, not an all-clear.</div></div></div>`;
+        } else {
+          const cmes = (window._liveCMEs||[]).filter(c=> c.eta==null || c.eta>Date.now()-864e5);
+          body = cmes.length ? cmes.map(c=>`<div class="alert-card critical" style="margin:0 0 8px">
+              <div class="alert-icon" style="background:rgba(249,115,22,.15);color:var(--orange);font-size:16px">☀</div>
+              <div class="alert-body"><div class="alert-title">${c.type} CME${c.speed?' — '+c.speed+' km/s':''}${c.source?' · '+c.source:''}</div>
+              <div class="alert-meta">Detected ${relT(c.detected)} · ETA ${etaT(c.eta)}</div>
+              ${c.kpPred?`<div style="margin-top:6px;font-size:11px;color:var(--tx2)">Predicted Kp ${c.kpPred}.</div>`:''}</div></div>`).join('')
+            : `<div class="alert-card info"><div class="alert-icon" style="background:rgba(34,197,94,.15);color:var(--green)">✓</div>
+              <div class="alert-body"><div class="alert-title">No Earth-directed CMEs</div><div class="alert-meta">No coronal mass ejections currently heading toward Earth</div></div></div>`;
+        }
+        card.innerHTML = '<h3>CME Alerts</h3>'+body;
+      },0);
+    };
+  }
+
+  async function loadCMEs(){
+    window._cmeStatus = 'loading'; window.renderCMEBanner();
+    try{
+      window._liveCMEs = parseCMEs(await fetchDONKI());
+      window._cmeStatus = 'ok';
+    }catch(e){
+      window._liveCMEs = []; window._cmeStatus = 'error';
+      console.warn('CME load failed:', e.message);
+    }
+    window.renderCMEBanner();
+    const pgc = document.getElementById('pgc');
+    if(pgc && (currentPage==='solar' || (currentPage==='signals' && window._sigTab==='solar')))
+      renderSolarPage(document.getElementById('sig-body')||pgc);
+  }
+
+  loadCMEs();
+  setInterval(loadCMEs, 30*60*1000); // every 30 min
+})();
+</script>
 </body>
 </html>
